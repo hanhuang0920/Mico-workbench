@@ -1763,6 +1763,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, page_index(), "text/html; charset=utf-8")
             elif self.path == "/api/refresh":
                 self._send(200, json.dumps(sync_from_excel(), ensure_ascii=False))
+            elif self.path.startswith("/api/spu-names"):
+                from urllib.parse import unquote
+                q = unquote(self.path.split("?", 1)[1]) if "?" in self.path else ""
+                spu = ""
+                for kv in q.split("&"):
+                    if kv.startswith("spu="):
+                        spu = kv[4:].strip()
+                rows = sb.get_spu_names(spu) if sb.enabled() else []
+                out = [{"spu": r.get("spu"), "name": r.get("name"),
+                        "url": r.get("url"), "inq": r.get("inq")} for r in rows]
+                self._send(200, json.dumps({"ok": True, "spu": spu, "items": out},
+                                           ensure_ascii=False))
             else:
                 self._send(404, json.dumps({"ok": False}, ensure_ascii=False))
         except Exception as e:
@@ -1901,21 +1913,6 @@ class Handler(BaseHTTPRequestHandler):
 
             if self.path == "/api/export":
                 self._send(200, json.dumps(export_pairs(), ensure_ascii=False))
-                return
-
-            # 按 SPU 查该货号关联的所有客户产品名
-            if self.path.startswith("/api/spu-names"):
-                from urllib.parse import unquote
-                q = unquote(self.path.split("?", 1)[1]) if "?" in self.path else ""
-                spu = ""
-                for kv in q.split("&"):
-                    if kv.startswith("spu="):
-                        spu = kv[4:].strip()
-                rows = sb.get_spu_names(spu) if sb.enabled() else []
-                out = [{"spu": r.get("spu"), "name": r.get("name"),
-                        "url": r.get("url"), "inq": r.get("inq")} for r in rows]
-                self._send(200, json.dumps({"ok": True, "spu": spu, "items": out},
-                                           ensure_ascii=False))
                 return
 
             if self.path == "/api/export-demand":
