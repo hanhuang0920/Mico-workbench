@@ -666,10 +666,18 @@ def esc(s):
     return html.escape(str(s))
 
 
+def cn_badge(cn):
+    """中文品名徽章：点击后切到产品库并按该品名筛选。"""
+    if not cn:
+        return ""
+    return ('<b class="cnbadge" title="点击查看全部「%s」同款" '
+            'onclick="byCn(\'%s\')">%s</b>' % (esc(cn), esc(cn), esc(cn)))
+
+
 def product_card(p):
     name = p["names"][0] if p["names"] else ""
     cn = similar.cn_of_names(p.get("names") or [])
-    cnb = ('<b class="cnbadge">%s</b>' % esc(cn)) if cn else ""
+    cnb = cn_badge(cn)
     extra = len(p["names"]) - 1
     if p.get("multi_spu"):
         spu_html = "".join('<b class="spu multi">%s</b>' % esc(s) for s in p["spus"])
@@ -721,7 +729,7 @@ def pair_card(i, p):
                  % (esc(u), esc(u), esc(short)))
     l1688 = '<div class="links">%s</div>' % rows
     cn = similar.cn_of_names(p.get("names") or [])
-    cnb = ('<b class="cnbadge">%s</b>' % esc(cn)) if cn else ""
+    cnb = cn_badge(cn)
     return (
         '<div class="paircard" data-inq="%s" data-url="%s" data-cn="%s"><div class="pi">%s</div><div class="pb">'
         '<div class="pn">%s %s</div>'
@@ -744,7 +752,7 @@ def news_card(i, p):
     img = ('<img src="%s" loading="lazy">' % esc(p["img"])) if p.get("img") else '<span class="nopic">无图</span>'
     checked = "checked" if p.get("checked", True) else ""
     cn = similar.cn_of_names(p.get("names") or [p.get("name", "")])
-    cnb = ('<b class="cnbadge">%s</b>' % esc(cn)) if cn else ""
+    cnb = cn_badge(cn)
     return (
         '<div class="newscard" data-idx="%d">'
         '<label class="chk"><input type="checkbox" data-idx="%d" %s></label>'
@@ -966,7 +974,8 @@ main{max-width:1560px;margin:0 auto;padding:16px 22px 60px}
 .siteurl:hover{background:#ccfbf1;text-decoration:none}
 .cnbadge{display:inline-block;font-size:10.5px;font-weight:600;color:#1d4ed8;
   background:#dbeafe;border:1px solid #bfdbfe;border-radius:4px;padding:1px 6px;
-  vertical-align:1px;margin-left:2px}
+  vertical-align:1px;margin-left:2px;cursor:pointer}
+.cnbadge:hover{background:#bfdbfe;border-color:#93c5fd}
 .simbtn.done{background:#d1fae5;border-color:#6ee7b7;color:#047857}
 .modal{position:fixed;inset:0;background:rgba(15,23,42,.62);z-index:200;
  display:none;align-items:center;justify-content:center;padding:20px}
@@ -1191,6 +1200,12 @@ function toast(m){
   var t=document.getElementById('toast'); t.textContent=m;
   t.classList.add('show'); setTimeout(function(){t.classList.remove('show')},2600);
 }
+function byCn(cn){
+  var q=document.getElementById('q0');
+  if(q)q.value=cn;
+  sw(0);
+  window.scrollTo(0,0);
+}
 var drop=document.getElementById('drop');
 if(drop){
   ['dragover','dragenter'].forEach(function(e){
@@ -1394,7 +1409,7 @@ function sim(idx,kind){
     var h='<div class="tgt"><div class="cmpimg">';
     h+= t.img? '<img src="'+esc2(t.img)+'">' : '<span class="nopic">无图</span>';
     h+='</div><div class="cmpinfo"><div style="font-size:11px;color:#94a3b8">比对目标</div>';
-    h+='<div class="cn" style="font-weight:700">'+esc2(t.names[0]||'')+'</div></div></div>';
+    h+='<div class="cn" style="font-weight:700">'+esc2(t.names[0]||'')+(t.cn?' <b class="cnbadge" onclick="byCn(\''+esc2(t.cn)+'\')">'+esc2(t.cn)+'</b>':'')+'</div></div></div>';
     if(!cs.length){
       h+='<div class="simempty">已询盘库中<b>没有找到相似产品</b><br>可以放心当作新品处理</div>';
     }else{
@@ -1404,7 +1419,7 @@ function sim(idx,kind){
         h+='<div class="cmp">';
         h+='<div class="cmpimg">'+(c.img?'<img src="'+esc2(c.img)+'">':'<span class="nopic">无图</span>')+'</div>';
         h+='<div class="cmpinfo">';
-        h+='<div class="cn">'+esc2(c.name)+(c.cn?' <b class="cnbadge">'+esc2(c.cn)+'</b>':'')+'</div>';
+        h+='<div class="cn">'+esc2(c.name)+(c.cn?' <b class="cnbadge" onclick="byCn(\''+esc2(c.cn)+'\')">'+esc2(c.cn)+'</b>':'')+'</div>';
         h+='<div class="cs">'+spuHtml(c)+'</div>';
         h+='<div style="font-size:11px;color:#94a3b8">'
            +(c.dist!==null?('图距 '+c.dist+' · '):'')
@@ -1443,7 +1458,11 @@ function markSame(btn,idx,kind,row){
     body:JSON.stringify({idx:idx,kind:kind,same:true,cand_row:row})})
   .then(function(r){return r.json()}).then(function(d){
     closeModal();
-    if(!d.ok){toast('标记保存失败');return}
+    if(!d.ok){toast('标记保存失败：'+(d.msg||''));return}
+    if(kind==='news'&&d.removed){
+      toast('库里已有同款，已移出未询盘新品');
+      setTimeout(function(){location.reload()},900);return;
+    }
     if(kind==='pair'&&spu){
       var el=document.querySelector('.spin[data-idx="'+idx+'"]');
       if(el){el.value=spu;el.classList.add('filled');}
@@ -1729,6 +1748,35 @@ class Handler(BaseHTTPRequestHandler):
                 key = "pairs" if kind == "pair" else "news"
                 lst = d.get(key, [])
                 if isinstance(i2, int) and 0 <= i2 < len(lst):
+                    # 新品确认同款 → 库里已有，不再算新品：整条移出 news
+                    if kind == "news" and same:
+                        item = lst[i2]
+                        if sb.enabled():
+                            if not item.get("id"):
+                                self._send(200, json.dumps(
+                                    {"ok": False, "msg": "该新品缺少云端ID，无法移除"},
+                                    ensure_ascii=False))
+                                return
+                            try:
+                                sb.delete("news", {"id": item["id"]})
+                            except Exception as e:
+                                self._send(200, json.dumps(
+                                    {"ok": False, "msg": "云端移除失败：%s" % str(e)[:80]},
+                                    ensure_ascii=False))
+                                return
+                        try:
+                            sb.log_op(user, "news_same_removed",
+                                      {"name": (item.get("names") or [item.get("name", "")])[0][:80],
+                                       "same_as": cand_row, "url": item.get("url") or ""})
+                        except Exception:
+                            pass
+                        lst = lst[:i2] + lst[i2 + 1:]
+                        d[key] = lst
+                        save_data(d)
+                        invalidate_cache()
+                        self._send(200, json.dumps({"ok": True, "removed": True},
+                                                   ensure_ascii=False))
+                        return
                     lst[i2]["same_as"] = cand_row if same else None
                     lst[i2]["mark"] = ("same" if same else "diff")
                     lst[i2]["by"] = user
