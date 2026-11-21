@@ -325,7 +325,9 @@ def import_quotes(path):
 
     todo = [q for q in quotes if norm(q["url"]) not in ex_url and q["inq"] not in ex_iq]
     if not todo:
-        return {"ok": True, "added": 0, "total": len(quotes), "msg": "没有新产品需要导入"}
+        pa, nr = quote_followup(quotes)
+        return {"ok": True, "added": 0, "total": len(quotes), "msg": "没有新产品需要导入",
+                "pairs_added": pa, "news_removed": nr}
 
     bak = backup_file(INQ_FILE)
     start = last + 1
@@ -388,8 +390,68 @@ def import_quotes(path):
         return {"ok": False, "msg": "四列表被占用，请关闭后重试"}
 
     sync_from_excel()
+
+    pa, nr = quote_followup(quotes)
     return {"ok": True, "added": len(todo), "total": len(quotes),
-            "imgs": len(got), "backup": bak, "total_rows": total}
+            "imgs": len(got), "backup": bak, "total_rows": total,
+            "pairs_added": pa, "news_removed": nr}
+
+
+def quote_followup(quotes):
+    """本批已询盘产品：无 SPU 的补进「待采集配对」，并从「未询盘新品」剔除。
+    返回 (新增配对数, 剔除新品数)。重复上传同一导出也安全（按询盘号/链接去重）。"""
+    d = load_data()
+    pairs = d.get("pairs", [])
+    have_inq = {p.get("inq") for p in pairs}
+    have_url = {norm(p.get("url")) for p in pairs}
+    by_inq = {p["inq"]: p for p in d.get("products", []) if p.get("inq")}
+    by_url = {norm(p["url"]): p for p in d.get("products", []) if p.get("url")}
+    added_pairs = []
+    for q in quotes:
+        pr = by_inq.get(q["inq"]) or by_url.get(norm(q["url"]))
+        if not pr:
+            continue
+        if (pr.get("spu") or "").strip():          # 已有 SPU，无需采集
+            continue
+        if q["inq"] in have_inq or norm(q["url"]) in have_url:
+            continue
+        added_pairs.append({
+            "url": q["url"] or pr.get("url", ""),
+            "names": pr.get("names") or [q["name"]],
+            "inq": q["inq"], "spu": "",
+            "u1688": pr.get("u1688") or q["links"],
+            "img": pr.get("img") or q["img"],
+            "filled_spu": "", "note": "",
+        })
+    if added_pairs:
+        d["pairs"] = pairs + added_pairs
+        d["pairs_date"] = datetime.date.today().isoformat()
+
+    q_urls = {norm(q["url"]) for q in quotes if q["url"]}
+    news = d.get("news", [])
+    keep = [n for n in news if norm(n.get("url")) not in q_urls]
+    removed_news = len(news) - len(keep)
+    if removed_news:
+        if sb.enabled():
+            for n in news:
+                if norm(n.get("url")) in q_urls and n.get("id"):
+                    try:
+                        sb.delete("news", {"id": n["id"]})
+                        sb.log_op("import", "news_quoted_removed",
+                                  {"name": (n.get("names") or [n.get("name", "")])[0][:80]})
+                    except Exception as e:
+                        print("[新品剔除失败]", e)
+        d["news"] = keep
+
+    if added_pairs or removed_news:
+        save_data(d)
+        if sb.enabled() and added_pairs:
+            try:
+                sb.save_pairs(d["pairs_date"], d["pairs"])
+            except Exception as e:
+                print("[Supabase 配对写入失败]", e)
+        invalidate_cache()
+    return len(added_pairs), removed_news
 
 
 def export_demand():
@@ -694,7 +756,7 @@ def cn_badge(cn):
 
 def product_card(p):
     name = p["names"][0] if p["names"] else ""
-    cn = similar.cn_of_names(p.get("names") or [])
+    cn = similar.cn_for(p)
     cnb = cn_badge(cn)
     extra = len(p["names"]) - 1
     if p.get("multi_spu"):
@@ -746,7 +808,7 @@ def pair_card(i, p):
                  'title="%s" class="siteurl">&#127761; %s</a></div>'
                  % (esc(u), esc(u), esc(short)))
     l1688 = '<div class="links">%s</div>' % rows
-    cn = similar.cn_of_names(p.get("names") or [])
+    cn = similar.cn_for(p)
     cnb = cn_badge(cn)
     return (
         '<div class="paircard" data-inq="%s" data-url="%s" data-cn="%s"><div class="pi">%s</div><div class="pb">'
@@ -769,7 +831,7 @@ def pair_card(i, p):
 def news_card(i, p):
     img = ('<img src="%s" loading="lazy">' % esc(p["img"])) if p.get("img") else '<span class="nopic">无图</span>'
     checked = "checked" if p.get("checked", True) else ""
-    cn = similar.cn_of_names(p.get("names") or [p.get("name", "")])
+    cn = similar.cn_for(p)
     cnb = cn_badge(cn)
     spu_v = p.get("filled_spu") or ""
     return (
@@ -852,7 +914,7 @@ def page_index():
     n_multi = sum(1 for p in prods if p.get("multi_spu"))
     n_noiq = sum(1 for p in prods if not p["inq"])
 
-    cards = "".join(product_card(p) for p in prods[:PER_PAGE])
+    cards = "".join(product_card(p) for p in prods)
     pcards = "".join(pair_card(i, p) for i, p in enumerate(pairs))
     no_pairs = '<div class="empty">还没有配对数据<br><span>请在 ① 上传今日订单文件</span></div>' if not pairs else ""
 
@@ -1352,7 +1414,12 @@ function saveNewsSpu(idx){
   .then(function(d){
     if(!d.ok){toast('写入失败：'+(d.errors&&d.errors[0]||'未知错误'));return}
     el.classList.add('filled');
-    toast('SPU 已保存到云端');
+    if(d.removed){
+      toast('SPU 已保存，该新品已剔除');
+      setTimeout(function(){location.reload()},900);
+    }else{
+      toast('SPU 已保存到云端');
+    }
   }).catch(function(e){toast('出错：'+e)});
 }
 function exportXlsx(){
@@ -1776,14 +1843,14 @@ class Handler(BaseHTTPRequestHandler):
                 cands = similar.find_similar(names, t.get("img", ""),
                                               d.get("products", []),
                                               exclude_inq=t.get("inq") or None,
-                                              exclude_spu=_sp)
+                                              exclude_spu=_sp, t_url=t.get("url"))
                 out = []
                 for c in cands:
                     c["level_txt"] = similar.LEVEL_TXT.get(c["level"], "")
                     out.append(c)
                 self._send(200, json.dumps(
                     {"ok": True, "target": {"names": names, "img": t.get("img", ""),
-                                            "cn": similar.cn_of_names(names)},
+                                            "cn": similar.cn_for(t)},
                      "candidates": out}, ensure_ascii=False))
                 return
 
@@ -1795,6 +1862,7 @@ class Handler(BaseHTTPRequestHandler):
                 news = d.get("news", [])
                 ok_n = 0
                 errs = []
+                removed_ids = []
                 for x in arr:
                     i2 = x.get("idx")
                     spu = (x.get("spu") or "").strip()
@@ -1812,10 +1880,31 @@ class Handler(BaseHTTPRequestHandler):
                                         (item.get("names") or [item.get("name", "")])[0][:80])
                         except Exception as e:
                             errs.append(str(e)[:120])
+                            continue
+                    # 填了 SPU = 货源已确认 → 剔除出未询盘新品
+                    if spu:
+                        if sb.enabled() and item.get("id"):
+                            try:
+                                sb.delete("news", {"id": item["id"]})
+                                sb.log_op(user, "news_spu_removed",
+                                          {"name": (item.get("names") or [item.get("name", "")])[0][:80],
+                                           "spu": spu, "url": item.get("url") or ""})
+                                removed_ids.append(item["id"])
+                            except Exception as e:
+                                errs.append("剔除失败:%s" % str(e)[:90])
+                drop = set()
+                for x in arr:
+                    i2 = x.get("idx")
+                    if isinstance(i2, int) and 0 <= i2 < len(news) and news[i2].get("id") in removed_ids:
+                        drop.add(i2)
+                if drop:
+                    news = [n for j, n in enumerate(news) if j not in drop]
+                    d["news"] = news
                 save_data(d)
                 invalidate_cache()
                 self._send(200, json.dumps(
-                    {"ok": not errs, "saved": ok_n, "errors": errs[:2]},
+                    {"ok": not errs, "saved": ok_n, "removed": len(removed_ids),
+                     "errors": errs[:2]},
                     ensure_ascii=False))
                 return
 

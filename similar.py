@@ -4,7 +4,7 @@ import sys, io, os, re, json, urllib.request
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 from difflib import SequenceMatcher
 
-BASE = r"D:\DSH\Mico"
+BASE = os.path.dirname(os.path.abspath(__file__))
 CACHE = os.path.join(BASE, "_imgcache")
 
 
@@ -517,6 +517,20 @@ def nsim(a, b):
 # ===== 跨语言产品品类词表（德/英/波兰语词根 → 中文品名） =====
 # 顺序 = 优先级：具体品类在前，宽泛品类在后；cn_of() 取第一个命中。
 CATEGORY_WORDS = {
+    # ---- 看图核对新增（2026-11-21）----
+    "坐垫": ["sitzkissen", "seat cushion", "坐垫", "办公椅垫"],
+    "桌垫": ["podkładka na biurko", "desk mat", "桌垫", "书桌垫"],
+    "老花镜": ["okulary do czytania", "reading glasses", "老花镜"],
+    "户外淋浴袋": ["torba prysznicowa", "camping shower", "淋浴袋"],
+    "超声波清洗机": ["ultraschallreinigungs", "ultrasonic cleaner", "超声波清洗"],
+    "电热袜": ["podgrzewane skarpetki", "beheizbare socken", "heated socks", "电热袜"],
+    "烟灰缸": ["popielniczka", "ashtray", "烟灰缸"],
+    "矫形鞋": ["buty ortopedyczne", "orthopedic shoes", "矫形鞋"],
+    "悬浮足球": ["hoverball", "air soccer", "悬浮足球"],
+    "精油加热器": ["massageölwärmer", "oil warmer", "精油加热"],
+    "宠物体温计": ["termometr dla zwierząt", "für haustiere", "dla zwierząt", "宠物体温"],
+    "耳环": ["earring", "stud earrings", "kolczyk", "耳环", "耳钉"],
+    "量角器": ["winkelmesser", "angle finder", "neigungsmesser", "量角器", "坡度仪"],
     # ---- 宠物穿戴（最先判，含 dla psa / Hund 等词，防止被人类服装抢走）----
     "宠物服装": ["dla psa", "dla kota", "hundemantel", "hundeparka", "hundejacke", "ubranka",
              "pet clothing", "dog sweater", "dog jacket", "kurtka dla psa", "parka dla psa",
@@ -525,23 +539,23 @@ CATEGORY_WORDS = {
     "羊绒开衫": ["kaschmir-cardigan", "cardigan", "kardigan"],
     "羊绒衫": ["kaschmir pullover", "kaschmirpullover", "kaszmir pullover", "cashmere sweater",
              "strickpullover", "merinos", "羊绒衫"],
-    "毛衣针织衫": ["sweter", "pullover", "sweater", "dzianin", "针织衫"],
+    "毛衣针织衫": ["sweter", "pullover", "sweater", "针织衫"],
     "卫衣帽衫": ["bluza", "hoodie", "sweatshirt", "z kapturem"],
     "衬衫": ["koszula", "henley", "shirt", "hemd", "衬衫"],
     "连衣裙": ["sukienka", "winterkleid", "dress", "kleid", "连衣裙"],
     "半身裙": ["spódnica", "skirt"],
     "连体裤": ["jumpsuit", "overal"],
     "T恤": ["t-shirt", "tshirt", "koszulka", "tee "],
-    "马甲背心": ["kamizelka", "weste", "vest"],
+    "马甲背心": ["kamizelka", "sleeveless vest", "weste", "vest"],
     "派克大衣": ["parka", "派克"],
     "雨衣雨披": ["regenjacke", "raincoat", "przeciwdeszczowa", "poncho", "雨衣"],
     "皮衣": ["skórzana kurtka", "kurtka damska skórzana", "kurtka skórzana",
           "lederjacke", "leather jacket"],
-    "冲锋衣外套": ["winddichte outdoorjacke", "wiatroszczelna", "outdoorjacke", "jacke",
+    "冲锋衣外套": ["winddichte outdoorjacke", "outdoorjacke", "jacke",
                "kurtka", "jack", "外套", "夹克", "steppmantel", "mantel", "coat"],
     "抓绒衣": ["fleecejacke", "fleece jacket"],
     "斗篷毯": ["kapuzendecke", "poncho", "cape"],
-    "披肩": ["shawl", "pashmina", "chusta", "披肩"],
+    "披肩": ["shawl wrap", "shawl", "pashmina", "chusta", "披肩"],
     "打底裤": ["legginsy", "leggings", "leggings", "winterleggings", "fleeceleggings", "打底裤"],
     "牛仔裤": ["jeans"],
     "休闲裤": ["spodnie", "pants", "baggy", "裤"],
@@ -550,9 +564,9 @@ CATEGORY_WORDS = {
     # ---- 穿戴配件 ----
     "围巾脖套": ["schlauchschal", "szalik", "winterschal", "komin", "scarf", "围巾"],
     "巴拉克拉法帽": ["kominiarka", "sturmhaube", "balaclava"],
-    "帽子": ["beanie", "mütze", "mutze", "czapka", "kapelusz", "hood", "czepek",
+    "帽子": ["beanie", "mütze", "mutze", "czapka", "kapelusz", "hood",
            "hat", "帽子", "bucket", "fedora"],
-    "耳罩": ["ohrenschützer", "ohrenklappen", " earmuff", "耳罩"],
+    "耳罩": ["ohrenschützer", "earmuff", "耳罩"],
     "手套": ["rękawiczki", "rekawiczki", "rękawice", "handschuhe", "gloves", "手套"],
     "袜子": ["socken", "skarpetki", "socks", "腿套", "beinstulpen", "袜子"],
     "连裤袜丝袜": ["strumpfhose", "pantyhose", "tights"],
@@ -564,8 +578,8 @@ CATEGORY_WORDS = {
     "拖鞋": ["hausschuhe", "kapcie", "slippers", "schlappen", "拖鞋"],
     "雪地靴冬鞋": ["stiefel", "botki", "buty zimowe", "snow boots", "winter shoes", "靴"],
     "凉鞋": ["sandals", "sandały"],
-    "运动鞋": ["sneakers", "tennisówki", "running shoes", "buty ortopedyczne", "orthopedic sandal", "矫形鞋"],
-    "鞋垫": ["wkładki", "insole", "鞋垫"],
+    "运动鞋": ["sneakers", "tennisówki", "running shoes", "运动鞋"],
+    "鞋垫": ["wkładki do butów", "wkładki", "insole", "鞋垫"],
     "宠物鞋": ["buty dla psa", "dog boots", "狗鞋"],
     # ---- 包 ----
     "背包书包": ["rucksack", "backpack", "plecak", "背包", "书包"],
@@ -573,7 +587,7 @@ CATEGORY_WORDS = {
     "手提包": ["handbag", "torebka", "torba damska", "手提包"],
     "化妆包": ["kosmetyczka", "makeup bag", "化妆包"],
     "工具包": ["torba narzędziowa", "tool bag", "工具包"],
-    "收纳包": ["organiser", "organizer bag", "收纳包"],
+    "收纳包": ["car seat organiser", "organiser", "organizer bag", "收纳包"],
     "防火文件袋": ["fireproof", "document bag"],
     # ---- 家居床品 ----
     "婴儿枕": ["baby pillow", "noworodka", "niemowląt", "pozycjonująca", "reflux pillow", "反流枕", "婴儿枕"],
@@ -585,20 +599,20 @@ CATEGORY_WORDS = {
     "四件套": ["pościel", "bedding", "被套"],
     "地毯地垫": ["teppich", "dywan", "地毯", "地垫"],
     "浴室防滑垫": ["duschmatte", "shower mat", "mata prysznicowa", "浴室垫"],
-    "冰垫宠物垫": ["cooling mat", "legowisko", "pet bed", "猫窝", "狗窝", "冰垫"],
-    "加热垫": ["podkładka grzewcza", "podgrzewane podkładki", "heizkissen", "electric blanket",
-            "加热垫", "grzewcza na ból", "电热垫", "电热毯"],
+    "冰垫宠物垫": ["cooling mat", "冰垫", "宠物冰垫"],
+    "加热垫": ["podkładka grzewcza", "poduszka grzewcza", "podgrzewane podkładki", "heizkissen", "electric blanket",
+            "加热垫", "grzewcza na ból", "koc grzewczy", "电热垫", "电热毯"],
     "窗帘": ["vorhang", "zasłona", "curtain", "窗帘"],
     "毛巾": ["handtuch", "ręcznik", "towel", "毛巾"],
     "浴刷": ["szczotka do mycia", "bath brush", "洗澡刷"],
     "马桶刷": ["toilet brush", "马桶刷"],
-    "挂钩": ["haken", "haczyk", "wieszak", "hook", "挂钩", "挂衣"],
+    "挂钩": ["clothes hanger", "wall hanger", "coat rack", "haken", "haczyk", "wieszak", "hook", "挂钩", "挂衣"],
     "收纳盒": ["aufbewahrung", "pudełko", "storage box", "aufbewahrungs", "收纳"],
     "书架置物架": ["regal", "półka", "shelf", "书架", "置物架"],
     "果盘": ["miska na owoce", "fruit tray", "果盘"],
     "核桃夹": ["nussknacker", "nutcracker", "核桃夹"],
     "杯": ["tasse", "cup", "mug", "butelka", "kanne", "dzbanek", "kettle", "tumbler",
-         "glass", "杯", "水壶", "保温"],
+         "杯", "水壶", "保温"],
     "沙发套": ["sofabezug", "couch cover", "沙发套"],
     "门密封条": ["uszczelka", "door seal", "密封条"],
     "水龙头套": ["osłona na kran", "water faucet cover", "水龙头套", "wasserhahn"],
@@ -612,8 +626,8 @@ CATEGORY_WORDS = {
     "手电筒": ["latarka", "taschenlampe", "flashlight", "torch", "手电筒", "手电"],
     "工作灯": ["lampa robocza", "work light", "robocza", "工作灯"],
     "投光灯": ["außenstrahler", "reflektor", "flood light", "spot light", "投光", "射灯"],
-    "氛围投影灯": ["projektor", "projector", "gwiazd", "nothern lights", "starsky",
-               "sopelki", "sternenlaser", "lichteffekt", "投影灯", "星空灯", "月球灯", "księżycowa"],
+    "氛围投影灯": ["projektor", "projector", "gwiazd", "northern lights", "starsky",
+               "sternenlaser", "投影灯", "星空灯", "月球灯", "księżycowa"],
     "圣诞树灯": ["weihnachtsprojektor", "lampki", "choinkowe", "christmas projector", "lamki choinkowe", "fairy lights",
               "solar garden light", "christmas candle", "树顶", "tree topper", "urn filler",
               "zdoby choinkowe", "圣诞灯", "圣诞装饰", "santa hat"],
@@ -622,7 +636,8 @@ CATEGORY_WORDS = {
     # ---- 取暖制冷 ----
     "取暖器": ["heizgerät", "heizer", "grzejnik", "elektroheizer", "nagrzewnica", "nawiew",
             "heater", "取暖", "烤火炉", "molekularny"],
-    "车载暖风机": ["auto heizung", "heiz- und kühl", "12v", "车暖", "车用暖风", "entfroster"],
+    "车载暖风机": ["auto heizung", "heiz- und kühl", "nagrzewnica samochodowa", "nagrzewnica",
+             "ogrzewacz i chłodzenie", "chłodzenie samochodowe", "车暖", "车用暖风", "entfroster"],
     "车载除冰": ["eiskratzer", "ice scraper", "除冰"],
     "汽车遮雪挡": ["windschutzscheibenabdeckung", "windshield cover", "遮雪"],
     "暖手宝": ["handwärmer", "ogrzewacz do rąk", "hand warmer", "暖手"],
@@ -649,12 +664,13 @@ CATEGORY_WORDS = {
     "点焊机": ["zgrzewarka", "spot welder", "点焊"],
     "万用表": ["multimetr", "multimeter", "万用"],
     "工具套装": ["werkzeug", "narzędzi", "tool kit", "tool set", "工具套装"],
-    "刀具": ["messer", "nóż", "knife", "topór", "axe", "刀", "斧"],
+    "刀具": ["nóż", "knife", "topór", "axe", "刀", "斧"],
     "焊锡钳子": ["szczypce", "pliers", "钳"],
     "梯凳": ["drabina", "ladder", "stool", "梯"],
     "胶水": ["klej", "glue", "adhesive", "胶"],
-    "修复贴": ["repair patch", "lederreparatur", "皮革修复", "tile repair", "flicken", "latka",
-            "naprawy skóry", "krem do naprawy"],
+    "皮革修复": ["leather repair", "lederreparatur", "naprawy skóry", "krem do naprawy",
+             "皮革修复", "flicken", "latka"],
+    "瓷砖修复": ["tile repair", "瓷砖修复"],
     "家具滑轮": ["möbelrollen", "furniture glider", "滑轮"],
     "家具搬运带": ["möbeltragegurt", "moving straps", "搬运带"],
     "家具护理": ["möbelpflege", "pielęgnacji mebli", "皮革保养", "家具护理"],
@@ -663,23 +679,23 @@ CATEGORY_WORDS = {
     "行车记录仪": ["dash cam", "autokamera", "行车记录"],
     "车载HUD": ["autotacho", "hud", "抬头显示"],
     "车载支架": ["uchwyt samochodowy", "phone mount", "car holder", "手机支架"],
-    "车载充电": ["ładowarka samochodowa", "car charger", "charger", "车充"],
+    "车载充电": ["ładowarka samochodowa", "car charger", "车充"],
     "自行车配件": ["fahrrad", "rower", "bicycle", "bike", "自行车"],
     "安全反光衣": ["sicherheitsweste", "hi-vis", "reflective vest", "反光衣"],
     # ---- 3C电子 ----
     "蓝牙耳机": ["kopfhörer", "słuchawki", "earbuds", "headphones", "headset", "耳机"],
-    "睡眠耳机": ["sleep headphones", "opaska na głowę ze słuchawk", "opaska", "睡眠耳"],
+    "睡眠耳机": ["sleep headphones", "opaska na głowę ze słuchawk", "睡眠耳"],
     "音箱": ["głośnik", "speaker", "bluetooth box", "音箱"],
     "麦克风": ["mikrofon", "microphone", "话筒"],
-    "K歌机": ["karaoke", "k歌"],
+    "K歌机": ["karaoke", "karaoke maschine", "karaoke machine", "mikrofon do karaoke", "k歌"],
     "收音机": ["hand crank radio", "radio", "kurbel", "notradio", "收音机"],
     "对讲机": ["walkie", "interkom", "对讲"],
     "数码相机": ["aparat", "digital camera", "相机"],
     "摄像头": ["überwachungskamera", "surveillance", "security camera", "monitoring",
             "mini kamera", "kamera", "camera", "摄像头"],
     "数码相机": ["aparat", "digital camera", "相机"],
-    "WiFi放大器": ["wzmacniacz wi-fi", "wifi extender", "repeater", "wifi"],
-    "充电宝": ["power bank", "powerbank", "充电宝"],
+    "WiFi放大器": ["wzmacniacz wi-fi", "wifi extender", "wifi repeater", "信号放大"],
+    "充电宝": ["solar power bank", "power bank", "powerbank", "充电宝"],
     "充电器": ["ładowarka", "charger", "usb ladegerät", "充电"],
     "智能手表": ["smartwatch", "zegrek", "手表"],
     "电子秤": ["waga", "scale", "skala", "秤"],
@@ -706,9 +722,8 @@ CATEGORY_WORDS = {
     "热敷眼罩": ["maska grzewcza na oczy", "eye mask", "heat eye", "眼罩"],
     "睡眠眼罩": ["maska do spania", "masce do spania", "sleep mask", "blaspheme", "遮光眼罩", "眼罩睡眠"],
     "助眠枕": ["reflux pillow", "反流枕"],
-    "加热护具": ["grzewcze", "beheizbar", "podgrzewane", "unterwaerm", "heated", "加热",
-             "thermo", "termo", "samochodowe 12v ogrzewacz"],
-    "暖宫腰带": ["menstru", "月经", "暖宫"],
+    "加热护具": ["grzewcze", "ogrzewane", "beheizbar", "unterwaerm", "heated", "加热"],
+    "暖宫腰带": ["menstru", "do bólu menstruacyjnego", "月经", "暖宫"],
     "体温计": ["thermometer", "termometr", "体温"],
     "指甲刀": ["nail clipper", "do paznokci", "nagel", "指甲"],
     "理发器": ["trymer", "trimmer", "klipper", "haarschneide", "理发"],
@@ -726,7 +741,7 @@ CATEGORY_WORDS = {
     "干发帽": ["czepek na włosy", "dry hair cap", "干发"],
     "面霜": ["krem do twarzy", "face cream", "cf", "面霜", "nickotynamid"],
     "驱蚊手环": ["opaska przeciw owadom", "mosquito band", "驱蚊手环"],
-    "灭蚊灯": ["fly trap", "mosquito", "insect killer", "mücken", "pułapka na", "灭蚊", "捕蚊"],
+    "灭蚊灯": ["fly trap", "mosquito zapper", "insect killer", "mücken", "灭蚊", "捕蚊"],
     "灭鼠器": ["myszy", "ratten", "mouse trap", "rat trap", "捕鼠", "灭鼠"],
     "射击耳罩": ["gehörschutz", "schießsport", "耳罩降噪"],
     "激光笔": ["wskaźnik", "wskaznik"],
@@ -739,18 +754,23 @@ CATEGORY_WORDS = {
     "婴儿背带": ["nosidełko", "baby carrier", "背带"],
     "儿童坐便器": ["potty", "toilet seat", "training", "坐便"],
     "安全门栏": ["travel gate", "barierka", "门栏"],
-    "蒙氏教具": ["montessori", "sensory", "tablica sensoryczna", "sensoryczna", "早教"],
+    "蒙氏教具": ["tablica sensoryczna", "sensory board", "sensoryczna", "早教板"],
     "积木": ["klocki", "building blocks", "lego", "积木"],
+    "打击乐": ["schlagzeug", "perkusyjny", "drum", "ksylofon", "打击乐", "打击乐器"],
     "益智玩具": ["fidget", "puzzle", "strategy board", "dice game", "spinner", "学习玩具",
              "math游戏", "mathe", "益智"],
-    "玩具车": ["rc", "ferngesteuert", "zdalnie sterowany", "remote control", "spielzeugauto",
-           "samochód", "excavator", "koparka", "kletterauto", "kapsułka", "łódź", "boat",
-           "hubschrauber", "helicopter", "plane", "flugzeug", "aeroplane", "toyota", "遥控"],
+    "玩具车": ["rc car", "rc auto", "rc-auto", "ferngesteuert", "ferngesteuertes auto",
+           "zdalnie sterowany", "spielzeugauto", "samochód", "excavator", "koparka",
+           "kletterauto", "transformer", "robot", "遥控车", "遥控汽车", "toyota"],
+    "遥控船": ["rc boat", "remote control boat", "łódź", "boat", "遥控船"],
+    "遥控直升机": ["rc helicopter", "hubschrauber", "helicopter", "gyroskop", "遥控直升机"],
+    "玩具飞机": ["spielzeugflugzeug", "flying aeroplane", "aeroplane", "flugzeug",
+           "plane toy", "airplane toy", "玩具飞机"],
     "方向盘玩具": ["lenkrad", " steering wheel toy", "方向盘"],
     "逗猫玩具": ["cat toy", "flapping feather", "interactive cat", "逗猫"],
     "玩具火车": ["eisenbahn", "train toy", "kolejka", "火车"],
     "秋千": ["schaukel", "cocoon swing", "sensory swing", "吊椅", "秋千"],
-    "水玩具": ["splash mat", "water slide", "piaskownica", "water and sand", "play table",
+    "戏水玩具": ["splash mat", "water slide", "piaskownica", "water and sand", "play table",
             "戏水", "滑梯"],
     "睡衣": ["piżama", "pizama", "schlafanzug", "pyjama", "睡衣"],
     "演出服": ["kostüm", "cosplay", "halloween", "santa claus", "vampir", "服装演出", "cos"],
@@ -758,11 +778,11 @@ CATEGORY_WORDS = {
     "狗胸背带": ["geschirr", "harness", "胸背"],
     "宠物窝": ["legowisko", "pet bed", "kennel", "猫窝", "狗窝"],
     "喂食器": ["feeder", "karmnik", "fountain", "trink", "自动喂", "喂食"],
-    "喂鸟器": ["bird feeder", "domek dla ptaków", " Vogelhaus", "鸟屋"],
+    "喂鸟器": ["bird feeder", "domek dla ptaków", "karmnik dla ptaków", "karmnik", "Vogelhaus", "鸟屋"],
     "止吠器": ["bark stopper", "antyszczek", "止吠"],
     "训狗项圈": ["halsband", "dog collar", "elektrisches hundehalsband", "项圈"],
     "宠物耳罩": ["hearing protectors for", "dog ear", "宠物耳"],
-    "宠物剃毛器": ["trymer do sierści", "maszynka do strzyżenia", "pet clipper", "宠物剃"],
+    "宠物剃毛器": ["trymer do sierści", "maszynka do strzyżenia", "pet clipper", "pet trimmer", "宠物剃"],
     "宠物洁牙": ["dental", " Teeth Cleaning Device for Canine", "dog tooth", "宠物牙"],
     "驱虫驱鸟": ["bird repeller", "bird deterrent", "ultraschall", "ultrasonic", "zwierzęta odstrasz",
              "repeller", "deterrent", "驱鸟", "驱虫"],
@@ -798,7 +818,7 @@ CATEGORY_WORDS = {
     "笔": ["pen", "długopis", "stift", "pióro", "笔"],
     "笔记本": ["notes", "zeszyt", "notbook", "笔记本"],
     "背包挂饰": ["charm", "breloczek", "挂饰"],
-    "3D打印笔": ["3d pen", "3d-stift", "dlugopis 3d", "gravierstift", "3d打印", "雕刻笔", "do grawerowania"],
+    "3D打印笔": ["3d pen", "3d-stift", "dlugopis 3d", "długopis 3d", "gravierstift", "3d打印", "雕刻笔", "do grawerowania"],
     "熨烫": ["bryczes", " żelazko", "iron", "熨斗"],
     "缝纫": ["nähmaschine", "maszyna do szycia", "sewing", "缝纫"],
     "毛球修剪器": ["golarka do kłaczków", "lint remover", "fabri", "毛球"],
@@ -815,15 +835,17 @@ CATEGORY_WORDS = {
 
 
 def cn_of(text):
-    """标题 → 中文品名（第一个命中），未识别返回 ''。"""
+    """标题 → 中文品名。取「最长匹配词」所在品类（具体词天然赢过宽泛词），
+    长度相同则按词表顺序优先。未识别返回 ''。"""
     t = re.sub(r"[\s\u00a0\u202f]+", " ", str(text or "")).lower().replace("–", "-")
     if not t:
         return ""
+    best, best_len = "", 0
     for cat, words in CATEGORY_WORDS.items():
         for w in words:
-            if w in t:
-                return cat
-    return ""
+            if len(w) > best_len and w in t:
+                best, best_len = cat, len(w)
+    return best
 
 
 _CN_MEMO = {}
@@ -844,6 +866,33 @@ def cn_of_names(names):
             break
     _CN_MEMO[key] = c
     return c
+
+
+CN_FILE = os.path.join(BASE, "cn_names.json")
+_CN_OVERRIDE = None
+
+
+def _load_overrides():
+    global _CN_OVERRIDE
+    if _CN_OVERRIDE is None:
+        try:
+            if os.path.exists(CN_FILE):
+                _CN_OVERRIDE = json.load(open(CN_FILE, encoding="utf-8"))
+            else:
+                _CN_OVERRIDE = {}
+        except Exception:
+            _CN_OVERRIDE = {}
+    return _CN_OVERRIDE
+
+
+def cn_for(p, url=None):
+    """产品/配对/新品 dict → 中文品名。
+    优先「看图核对表」cn_names.json（人工+图片校准），其次标题词表推导。"""
+    ov = _load_overrides()
+    for u in (norm(url or ""), norm(p.get("url") or ""), p.get("inq") or ""):
+        if u and u in ov:
+            return ov[u]
+    return cn_of_names(p.get("names") or [p.get("name", "")])
 
 
 def _cats(text):
@@ -870,7 +919,7 @@ def cat_overlap(a_names, b_names):
 
 
 def find_similar(target_names, target_img_url, pool, topn=3, min_score=0.50,
-                 exclude_inq=None, exclude_rows=None, exclude_spu=None):
+                 exclude_inq=None, exclude_rows=None, exclude_spu=None, t_url=None):
     """
     在 pool 中找相似款。
     pool: [{"row","names","url","inq","spu","spus","img","u1688"}]
@@ -883,7 +932,7 @@ def find_similar(target_names, target_img_url, pool, topn=3, min_score=0.50,
     twhite = _white_of(tsig) if tsig else 0.0
     turl = norm(target_img_url)
     tnames_set = set(target_names)
-    tcn = cn_of_names(target_names)          # 目标中文品名（粗筛主键）
+    tcn = cn_for({"names": target_names}, url=t_url)   # 目标中文品名（审核表优先）
 
     scored = []
     for x in pool:
@@ -903,7 +952,7 @@ def find_similar(target_names, target_img_url, pool, topn=3, min_score=0.50,
             continue
         ns = max((nsim(tname, n) for n in x.get("names", [])), default=0.0)
         # ---- 中文品名粗筛：同名才精比；跨品类必须标题高度相似 ----
-        xcn = x.get("cn") or cn_of_names(x.get("names", []))
+        xcn = x.get("cn") or cn_for(x)
         if tcn:
             if xcn and xcn != tcn and ns < 0.62:
                 continue
