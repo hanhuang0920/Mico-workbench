@@ -593,7 +593,9 @@ CATEGORY_WORDS = {
     "收纳包": ["car seat organiser", "organiser", "organizer bag", "收纳包"],
     "防火文件袋": ["fireproof", "document bag"],
     # ---- 家居床品 ----
-    "婴儿枕": ["baby pillow", "noworodka", "niemowląt", "pozycjonująca", "reflux pillow", "反流枕", "婴儿枕"],
+    "婴儿枕": ["baby pillow", "reflux pillow", "noworodka", "niemowląt", "niemowl",
+             "pozycjonująca", "poduszka dziecięca", "miękka poduszka dziecięca",
+             "婴儿枕", "反流枕"],
     "枕头": ["poduszka do snu", "poduszka ortopedyczna", "poduszka podr", "neck pillow",
         "na szyję", "旅行枕", "U型枕", "headrest", "pillow", "kissen", "poduszka", "枕头"],
     "抱枕靠垫": ["throw pillow", "dekorative poduszka", "抱枕", "靠垫"],
@@ -754,7 +756,7 @@ CATEGORY_WORDS = {
     "急救包": ["first aid", "apteczka", "急救"],
     "药盒": ["pillenorganizer", "pill box", "tygodniowa", "药盒"],
     # ---- 母婴儿童 ----
-    "婴儿枕": ["baby pillow", "noworodka", "niemowl", "婴儿枕"],
+
     "婴儿背带": ["nosidełko", "baby carrier", "背带"],
     "儿童坐便器": ["potty", "toilet seat", "training", "坐便"],
     "安全门栏": ["travel gate", "barierka", "门栏"],
@@ -987,6 +989,10 @@ def find_similar(target_names, target_img_url, pool, topn=3, min_score=0.50,
         # 跨语言品类识别
         ov, ca, cb = cat_overlap(target_names, x.get("names", []))
 
+        # 实词重合计分：多语言标题里能共现的实词越多，越可能是同一款（跳过 stop 词）
+        tk, xk = toks(tname), toks(x.get("names", [""])[0])
+        shared_kw = len(tk & xk)
+
         # ===== 多证据融合判定（经 8组正样本 + 200组负样本标定）=====
         #   same     : 16x16极小 或 (精细距<=600 且 色相>=0.75)
         #   likely   : (精细<=750 且 色相>=0.55)
@@ -1015,6 +1021,10 @@ def find_similar(target_names, target_img_url, pool, topn=3, min_score=0.50,
             level = "possible"
         elif has_img and xcn and tcn and xcn == tcn and df <= 900:
             level = "possible"                      # 同一中文品名兜底：交给人工确认
+        elif has_img and xcn and tcn and xcn == tcn and shared_kw >= 2 and df <= 1050:
+            level = "possible"                      # 同品名 + 多个实词重合（不同语言/摆拍图也能捞回）
+        elif has_img and xcn and tcn and xcn == tcn and hc >= 0.78 and df <= 1050:
+            level = "possible"                      # 同品名 + 主色一致（摆拍 vs 实拍图的兜底）
         elif ns >= 0.78:                            # 标题几乎相同
             level = "likely"
         elif ns >= 0.65 and ov:
@@ -1031,9 +1041,12 @@ def find_similar(target_names, target_img_url, pool, topn=3, min_score=0.50,
         else:
             score = ns * 0.75 + (0.25 if ov else 0.0)
 
-        if score < min_score and level not in ("same", "likely"):
+        # 同中文品名的候选放宽门槛：属于同一类目、图和标题都还沾边，值得人工看一眼
+        same_cn = bool(tcn and xcn and tcn == xcn)
+        eff_min = min_score if not same_cn else min(min_score, 0.42)
+        if score < eff_min and level not in ("same", "likely"):
             continue
-        if level == "possible" and score < min_score:
+        if level == "possible" and score < eff_min:
             continue
         scored.append({
             "row": x.get("row"),
