@@ -539,9 +539,10 @@ def save_spu_supabase(arr, editor):
 
 
 def record_edit(pairs, editor, arr):
-    """记录谁在什么时候改了什么。"""
+    """记录谁在什么时候改了什么（edit_log 并行写，省网络往返时间）。"""
     if sb.enabled():
         try:
+            jobs = []
             for x in arr:
                 i2 = x.get("idx")
                 spu = (x.get("spu") or "").strip()
@@ -549,8 +550,13 @@ def record_edit(pairs, editor, arr):
                     continue
                 old = pairs[i2].get("spu") or ""
                 nm = (pairs[i2].get("names") or [""])[0][:80]
-                sb.log_edit(editor, "pairs", pairs[i2].get("id"),
-                            old, spu, nm)
+                jobs.append((pairs[i2].get("id"), old, spu, nm))
+            if jobs:
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=min(6, len(jobs))) as ex:
+                    list(ex.map(
+                        lambda j: sb.log_edit(editor, "pairs", j[0], j[1], j[2], j[3]),
+                        jobs))
         except Exception as e:
             print("[Supabase 日志写入失败] %s" % e)
     d = load_data()
@@ -568,7 +574,8 @@ def record_edit(pairs, editor, arr):
     save_data(d)
 
 
-def apply_spu_to_master(user_name=""):
+def apply_spu_to_master(user_name="", sync_pairs=True):
+    """sync_pairs=False 时跳过 pairs 重复写入（save-spu 路径已由 save_spu_supabase 写过）。"""
     d = load_data()
     filled = [p for p in d.get("pairs", []) if (p.get("filled_spu") or "").strip()]
     if not filled:
@@ -611,17 +618,19 @@ def apply_spu_to_master(user_name=""):
                 })
             if prods_now:
                 sb.upsert_products(prods_now)
-            # 同步 pairs 表里的人工填写值
-            for p in filled:
-                if p.get("id"):
-                    try:
-                        sb.update_pair_spu(p["id"], p["filled_spu"].strip(), user_name)
-                    except Exception:
-                        pass
+            # 同步 pairs 表里的人工填写值（save-spu 路径已写过，跳过省一次往返）
+            if sync_pairs:
+                for p in filled:
+                    if p.get("id"):
+                        try:
+                            sb.update_pair_spu(p["id"], p["filled_spu"].strip(), user_name)
+                        except Exception:
+                            pass
         except Exception as e:
             print("[Supabase SPU 同步失败] %s" % e)
     invalidate_cache()
-    sync_from_excel()
+    if not sb.enabled():
+        sync_from_excel()
     return {"ok": True, "updated": upd, "skipped": skip, "backup": bak}
 
 
@@ -1197,11 +1206,18 @@ function collect(){
   });
   return arr.filter(function(x){return x.spu});
 }
-function doSave(arr,done){
+var SAVING=false;
+function doSave(arr,done,retry){
   if(!arr.length){toast('还没有填写任何 SPU');return}
+  if(SAVING){toast('正在保存中…');return}
+  SAVING=true;
+  retry=retry||0;
   fetch('/api/save-spu',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({spus:arr})}).then(function(r){return r.json()})
+    body:JSON.stringify({spus:arr})}).then(function(r){
+      if(!r.ok)throw Error('HTTP '+r.status);
+      return r.json()})
   .then(function(d){
+    SAVING=false;
     if(!d.ok){
       toast('云端未写入：'+(d.msg||(d.errors&&d.errors[0])||'未知错误'));
       console.log('[save-spu]',d); return;
@@ -1211,7 +1227,15 @@ function doSave(arr,done){
     if(d.xlsx_msg)m+='（'+d.xlsx_msg+'）';
     toast(m);
     if(done)setTimeout(function(){location.reload()},1200);
-  }).catch(function(e){toast('出错：'+e)});
+  }).catch(function(e){
+    SAVING=false;
+    if(retry<2){
+      toast('服务唤醒中，重试 '+(retry+1)+'/2 …');
+      setTimeout(function(){doSave(arr,done,retry+1)},4000);
+    }else{
+      toast('保存失败：服务可能在冷启动，1 分钟后再试（'+e+'）');
+    }
+  });
 }
 function saveOne(idx){
   var el=document.querySelector('.spin[data-idx="'+idx+'"]');
@@ -1560,7 +1584,7 @@ class Handler(BaseHTTPRequestHandler):
                 res = {"ok": ok_n > 0 or not arr, "cloud": ok_n,
                        "failed": fail_n, "errors": errs[:5]}
                 try:
-                    xl = apply_spu_to_master(user)
+                    xl = apply_spu_to_master(user, sync_pairs=False)
                     res["updated"] = xl.get("updated", 0)
                     res["backup"] = xl.get("backup")
                     if not xl.get("ok"):
