@@ -268,6 +268,17 @@ def process_order(path):
             "mark": prev.get("mark"), "note": prev.get("note") or "",
         })
 
+    # 已填过 SPU 的配对（人工处理过的成果）即使不在本次订单里也保留，避免白干
+    in_order_urls = {norm(x.get("url")) for x in pairs_out if x.get("url")}
+    in_order_inq = {x.get("inq") for x in pairs_out if x.get("inq")}
+    for op in d.get("pairs", []):
+        if not (op.get("filled_spu") or "").strip():
+            continue
+        u = norm(op.get("url"))
+        if (u and u in in_order_urls) or (op.get("inq") and op.get("inq") in in_order_inq):
+            continue
+        pairs_out.append(op)
+
     pairs = pairs_out
     pairs.sort(key=lambda x: (0 if x.get("spu") else 1, x.get("inq") or ""))
     news = news_out
@@ -2048,9 +2059,42 @@ class Handler(BaseHTTPRequestHandler):
                 key = "pairs" if kind == "pair" else "news"
                 lst = d.get(key, [])
                 if isinstance(i2, int) and 0 <= i2 < len(lst):
-                    # 新品确认同款 → 库里已有，不再算新品：整条移出 news
+                    # 新品确认同款 → 并入产品库（带库里同款的 SPU），并从新品移除
                     if kind == "news" and same:
                         item = lst[i2]
+                        cand = None
+                        rows = d.get("products", [])
+                        for pr in rows:
+                            if pr.get("row") == cand_row:
+                                cand = pr
+                                break
+                        spu_val = (cand or {}).get("spu") or ""
+                        # 并入产品库：作为库内同款的另一个客户名称
+                        if cand:
+                            try:
+                                nm = (item.get("names") or [item.get("name", "")])
+                                sb.upsert_products([{
+                                    "row": None, "names": nm,
+                                    "url": item.get("url") or "",
+                                    "inq": cand.get("inq") or "",
+                                    "batch": cand.get("batch") or "",
+                                    "spu": spu_val,
+                                    "spus": sb.split_spu(spu_val),
+                                    "u1688": cand.get("u1688") or [],
+                                    "img": item.get("img") or cand.get("img") or "",
+                                }])
+                                if spu_val:
+                                    sb.put_spu_names([{"spu": y.strip(), "name": n,
+                                                       "url": item.get("url") or "",
+                                                       "inq": cand.get("inq") or ""}
+                                                      for y in re.split(r"[,\s/;]+", spu_val) if y.strip()
+                                                      for n in nm])
+                                sb.log_op(user, "news_same_merged_to_library",
+                                          {"name": (nm or [""])[0][:80], "spu": spu_val,
+                                           "same_as_row": cand_row,
+                                           "url": item.get("url") or ""})
+                            except Exception as e:
+                                print("[合并入库失败] %s" % e)
                         if sb.enabled():
                             if not item.get("id"):
                                 self._send(200, json.dumps(
@@ -2064,18 +2108,13 @@ class Handler(BaseHTTPRequestHandler):
                                     {"ok": False, "msg": "云端移除失败：%s" % str(e)[:80]},
                                     ensure_ascii=False))
                                 return
-                        try:
-                            sb.log_op(user, "news_same_removed",
-                                      {"name": (item.get("names") or [item.get("name", "")])[0][:80],
-                                       "same_as": cand_row, "url": item.get("url") or ""})
-                        except Exception:
-                            pass
                         lst = lst[:i2] + lst[i2 + 1:]
                         d[key] = lst
                         save_data(d)
                         invalidate_cache()
-                        self._send(200, json.dumps({"ok": True, "removed": True},
-                                                   ensure_ascii=False))
+                        self._send(200, json.dumps(
+                            {"ok": True, "removed": True, "spu": spu_val},
+                            ensure_ascii=False))
                         return
                     lst[i2]["same_as"] = cand_row if same else None
                     lst[i2]["mark"] = ("same" if same else "diff")
