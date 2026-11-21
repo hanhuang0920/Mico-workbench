@@ -514,53 +514,328 @@ def nsim(a, b):
     return max(jac, seq)
 
 
-# ===== 跨语言产品类型词表 =====
+# ===== 跨语言产品品类词表（德/英/波兰语词根 → 中文品名） =====
+# 顺序 = 优先级：具体品类在前，宽泛品类在后；cn_of() 取第一个命中。
 CATEGORY_WORDS = {
-    "羊绒衫": ["kaschmir pullover", "kaszmir", "kaschmirpullover", "cashmere sweater",
-              "sweter meski", "sweter", "pullover", "strickpullover", "羊绒衫"],
-    "打底裤": ["legginsy", "leggings", "thermo leggings", "winterleggings", "打底裤"],
-    "派克大衣": ["parka", "winterparka", "wiatr", "winddicht", "派克"],
-    "雨衣": ["regenjacke", "raincoat", "kurtka przeciwdeszczowa"],
-    "围巾脖套": ["schlauchschal", "szalik", "komin", "scarf", "haarband", "围巾"],
-    "秋千": ["kokonschaukel", "cocoon swing", "schaukel", "swing", "秋千"],
-    "K歌机": ["karaoke", "k歌"],
-    "睡衣": ["piżama", "pizama", "schlafanzug", "pyjama", "睡衣"],
-    "收音机": ["hand crank radio", "radio awaryjne", "kurbel", "notradio", "收音机"],
-    "投影灯": ["projektor", "projekt", "projector", "lichteffekt", "投影"],
-    "望远镜": ["lornetka", "binoculars", "monokular", "fernglas", "望远镜"],
-    "收音": ["radio"],
-    "手套": ["rekawiczki", "handschuhe", "gloves", "rękawice", "手套"],
-    "皮革贴": ["latka", "flicken", "repair patch", "皮革贴"],
-    "切菜器": ["krajalnica", "gemuseschneider", "vegetable slicer", "slicer"],
-    "3D笔": ["3d pen", "3d-stift", "dlugopis 3d", "gravierstift", "3d打印笔"],
-    "遥控车": ["zdalnie sterowany", "remote control car", "ferngesteuert", "rc car"],
-    "打击乐": ["schlagzeug", "perkusyjny", "drum"],
-    "羊绒围巾": ["kaszmir", "kaschmir", "cashmere"],
-    "门锁": ["turschloss", "zamek", "door lock", "密码锁"],
-    "摄像头": ["kamera", "camera", "摄像头"],
-    "加热袜": ["beheizbare socken", "skarpetki", "heated socks", "加热袜"],
-    "弹簧摆件": ["kinetischer", "kinetic", "molekularheizer", "分子加热",
-              "spring toy", "sprężyn", "feder", "弹簧", "摆件",
-              "car perfume", "auto duft", "香薰摆件", "车载摆件"],
-    "唇膏口红": ["lipstick", "lippenstift", "szminka"],
-    "拖鞋": ["hausschuhe", "kapcie", "slippers", "拖鞋", "schlappen"],
-    "保温杯": ["thermos", "tumbler", "butelka termiczna", "保温"],
-    "书包背包": ["rucksack", "backpack", "plecak", "背包", "书包"],
-    "蓝牙耳机": ["kopfhörer", "sluchawki", "earbuds", "headphones", "耳机"],
-    "充电宝": ["power bank", "powerbank", "充电宝"],
-    "电钻": ["bohrmaschine", "wiertarka", "drill", "电钻"],
-    "工具套装": ["werkzeug", "narzędzi", "tool kit", "工具"],
-    "地毯地垫": ["teppich", "dywan", "地毯", "地垫", "mat"],
+    # ---- 服装（具体在前）----
+    "羊绒开衫": ["kaschmir-cardigan", "cardigan", "kardigan"],
+    "羊绒衫": ["kaschmir pullover", "kaschmirpullover", "kaszmir pullover", "cashmere sweater",
+             "strickpullover", "merinos", "羊绒衫"],
+    "毛衣针织衫": ["sweter", "pullover", "sweater", "dzianin", "针织衫"],
+    "卫衣帽衫": ["bluza", "hoodie", "sweatshirt", "z kapturem"],
+    "衬衫": ["koszula", "henley", "shirt", "hemd", "衬衫"],
+    "连衣裙": ["sukienka", "winterkleid", "dress", "kleid", "连衣裙"],
+    "半身裙": ["spódnica", "skirt"],
+    "连体裤": ["jumpsuit", "overal"],
+    "T恤": ["t-shirt", "tshirt", "koszulka", "tee "],
+    "马甲背心": ["kamizelka", "weste", "vest"],
+    "派克大衣": ["parka", "派克"],
+    "雨衣雨披": ["regenjacke", "raincoat", "przeciwdeszczowa", "poncho", "雨衣"],
+    "冲锋衣外套": ["winddichte outdoorjacke", "wiatroszczelna", "outdoorjacke", "jacke",
+               "kurtka", "jack", "外套", "夹克", "steppmantel", "mantel", "coat"],
+    "抓绒衣": ["fleecejacke", "fleece jacket"],
+    "皮衣": ["skórzana kurtka", "lederjacke", "leather jacket"],
+    "斗篷毯": ["kapuzendecke", "poncho", "cape"],
+    "披肩": ["shawl", "pashmina", "chusta", "披肩"],
+    "打底裤": ["legginsy", "leggings", "leggings", "winterleggings", "fleeceleggings", "打底裤"],
+    "牛仔裤": ["jeans"],
+    "休闲裤": ["spodnie", "pants", "baggy", "裤"],
+    "内裤内衣": ["biustonosz", "bra ", "boxer", "underwear", "内衣"],
+    "保暖裤护腰": ["nierenwärmer", "niere", "护腰"],
+    # ---- 穿戴配件 ----
+    "围巾脖套": ["schlauchschal", "szalik", "winterschal", "komin", "scarf", "围巾"],
+    "巴拉克拉法帽": ["kominiarka", "sturmhaube", "balaclava"],
+    "帽子": ["beanie", "mütze", "mutze", "czapka", "kapelusz", "hood", "czepek",
+           "hat", "帽子", "bucket", "fedora"],
+    "耳罩": ["ohrenschützer", "ohrenklappen", " earmuff", "耳罩"],
+    "手套": ["rękawiczki", "rekawiczki", "rękawice", "handschuhe", "gloves", "手套"],
+    "袜子": ["socken", "skarpetki", "socks", "腿套", "beinstulpen", "袜子"],
+    "连裤袜丝袜": ["strumpfhose", "pantyhose", "tights"],
+    "腰带": ["gürtel", "belt", "gürtel ohne", "腰带"],
+    "领带套装": ["krawat", "tie set", "领结"],
+    "墨镜太阳镜": ["sunglasses", "sonnenbrille", "okulary", "goggles", "nachtfahrbrille", "护目镜"],
+    "泳镜": ["swimming goggles", "best swimming"],
+    # ---- 鞋 ----
+    "拖鞋": ["hausschuhe", "kapcie", "slippers", "schlappen", "拖鞋"],
+    "雪地靴冬鞋": ["stiefel", "botki", "buty zimowe", "snow boots", "winter shoes", "靴"],
+    "凉鞋": ["sandals", "sandały"],
+    "运动鞋": ["sneakers", "tennisówki", "running shoes", "buty ortopedyczne", "orthopedic sandal", "矫形鞋"],
+    "鞋垫": ["wkładki", "insole", "鞋垫"],
+    "宠物鞋": ["buty dla psa", "dog boots", "狗鞋"],
+    # ---- 包 ----
+    "背包书包": ["rucksack", "backpack", "plecak", "背包", "书包"],
+    "斜挎包": ["listonoszka", "shoulder bag", "torba na ramię", "saszetka", "crossbody", "挎包"],
+    "手提包": ["handbag", "torebka", "torba damska", "手提包"],
+    "化妆包": ["kosmetyczka", "makeup bag", "化妆包"],
+    "工具包": ["torba narzędziowa", "tool bag", "工具包"],
+    "收纳包": ["organiser", "organizer bag", "收纳包"],
+    "防火文件袋": ["fireproof", "document bag"],
+    # ---- 家居床品 ----
+    "枕头": ["poduszka do snu", "do spania", "poduszka ortopedyczna", "poduszka podr", "neck pillow",
+        "na szyję", "旅行枕", "U型枕", "headrest", "pillow", "kissen", "枕头"],
+    "抱枕靠垫": ["throw pillow", "dekorative poduszka", "抱枕", "靠垫"],
+    "床垫保护罩": ["mattress", "matraze", "床罩"],
+    "毯子": ["koc", "blanket", "decke", "毯"],
+    "四件套": ["pościel", "bedding", "被套"],
+    "地毯地垫": ["teppich", "dywan", "地毯", "地垫"],
+    "浴室防滑垫": ["duschmatte", "shower mat", "mata prysznicowa", "浴室垫"],
+    "冰垫宠物垫": ["cooling mat", "legowisko", "pet bed", "猫窝", "狗窝", "冰垫"],
+    "加热垫": ["podkładka grzewcza", "podgrzewane podkładki", "heizkissen", "electric blanket",
+            "加热垫", "grzewcza na ból", "电热垫", "电热毯"],
     "窗帘": ["vorhang", "zasłona", "curtain", "窗帘"],
-    "抱枕": ["kissen", "poduszka", "pillow", "抱枕", "靠垫"],
     "毛巾": ["handtuch", "ręcznik", "towel", "毛巾"],
-    "雨伞": ["regenschirm", "parasol", "umbrella", "雨伞"],
-    "保温壶": ["kanne", "dzbanek", "kettle", "水壶"],
-    "收纳盒": ["aufbewahrung", "pudełko", "storage box", "收纳"],
-    "书架": ["regal", "półka", "shelf", "书架"],
-    "挂钩": ["haken", "haczyk", "hook", "挂钩"],
+    "浴刷": ["szczotka do mycia", "bath brush", "洗澡刷"],
+    "马桶刷": ["toilet brush", "马桶刷"],
+    "挂钩": ["haken", "haczyk", "wieszak", "hook", "挂钩", "挂衣"],
+    "收纳盒": ["aufbewahrung", "pudełko", "storage box", "aufbewahrungs", "收纳"],
+    "书架置物架": ["regal", "półka", "shelf", "书架", "置物架"],
+    "果盘": ["miska na owoce", "fruit tray", "果盘"],
+    "核桃夹": ["nussknacker", "nutcracker", "核桃夹"],
+    "杯": ["tasse", "cup", "mug", "butelka", "kanne", "dzbanek", "kettle", "tumbler",
+         "glass", "杯", "水壶", "保温"],
+    "沙发套": ["sofabezug", "couch cover", "沙发套"],
+    "门密封条": ["uszczelka", "door seal", "密封条"],
+    "水龙头套": ["osłona na kran", "water faucet cover", "水龙头套", "wasserhahn"],
+    "地漏": ["filtr odpływowy", "drain cover", "地漏"],
+    # ---- 灯具电工 ----
+    "小夜灯": ["nachtlicht", "lampka nocna", "night light", "夜灯"],
+    "壁灯": ["wandleuchte", "kinkiet", "wall lamp", "壁灯"],
+    "台灯": ["lampa stołowa", "desk lamp", "biurko", "台灯"],
+    "吊灯": ["pendant", "żyrandol", "吊灯"],
+    "头灯": ["czołowa", "headlamp", "head torch", "头灯"],
+    "手电筒": ["latarka", "taschenlampe", "flashlight", "torch", "手电筒", "手电"],
+    "工作灯": ["lampa robocza", "work light", "robocza", "工作灯"],
+    "投光灯": ["außenstrahler", "reflektor", "flood light", "spot light", "投光", "射灯"],
+    "氛围投影灯": ["projektor", "projector", "gwiazd", "nothern lights", "starsky",
+               "sopelki", "sternenlaser", "lichteffekt", "投影灯", "星空灯", "月球灯", "księżycowa"],
+    "圣诞树灯": ["weihnachtsprojektor", "lampki", "choinkowe", "christmas projector", "lamki choinkowe", "fairy lights",
+              "solar garden light", "christmas candle", "树顶", "tree topper", "urn filler",
+              "zdoby choinkowe", "圣诞灯", "圣诞装饰", "santa hat"],
+    "风扇": ["wentylator", "desk fan", "fan ", "电扇", "usb desk"],
+    "插座电工": ["gniazdk", "outlet", "adapter", "插座"],
+    # ---- 取暖制冷 ----
+    "取暖器": ["heizgerät", "heizer", "grzejnik", "elektroheizer", "nagrzewnica", "nawiew",
+            "heater", "取暖", "烤火炉", "molekularny"],
+    "车载暖风机": ["auto heizung", "heiz- und kühl", "12v", "车暖", "车用暖风", "entfroster"],
+    "车载除冰": ["eiskratzer", "ice scraper", "除冰"],
+    "汽车遮雪挡": ["windschutzscheibenabdeckung", "windshield cover", "遮雪"],
+    "暖手宝": ["handwärmer", "ogrzewacz do rąk", "hand warmer", "暖手"],
+    "热水袋": ["hot water bottle", "wärmflasche", "热水袋"],
+    # ---- 厨房 ----
+    "切菜器": ["krajalnica", "gemuseschneider", "vegetable slicer", "mandolina", "切菜"],
+    "煮蛋器": ["jajek na parze", "egg cooker", "煮蛋"],
+    "净水器": ["filtr wody", "water filter", "净水"],
+    "咖啡具": ["espresso", "coffee", "kawa", "咖啡"],
+    "厨房工具": ["kitchen gadget", "przybory kuchenne", "厨具"],
+    "餐具": ["sztućce", "cutlery", "plate", "talerz", "碗", "盘"],
+    "保鲜盒": ["pojemnik", "food container", " Lunch box", "饭盒"],
+    "围裙": ["schürze", "apron", "围裙"],
+    "手套 oven": ["rękawice kuchenne"],
+    # ---- 清洁 ----
+    "吸尘器": ["staubsauger", "vacuum", "odkurzacz", "吸尘"],
+    "拖把扫把": ["mop", "szczotka", "broom", "拖把", "扫把"],
+    "洗衣": ["pralka", "laundry", "洗衣"],
+    "垃圾袋": ["worek", "trash bag", "垃圾袋"],
+    # ---- 工具五金 ----
+    "电钻": ["bohrmaschine", "wiertarka", "drill", "电钻"],
+    "电动螺丝刀": ["elektryczny srub", "screwdriver", "螺丝刀"],
+    "电烙铁": ["lutownica", "soldering iron", "烙铁"],
+    "点焊机": ["zgrzewarka", "spot welder", "点焊"],
+    "万用表": ["multimetr", "multimeter", "万用"],
+    "工具套装": ["werkzeug", "narzędzi", "tool kit", "tool set", "工具套装"],
+    "刀具": ["messer", "nóż", "knife", "topór", "axe", "刀", "斧"],
+    "焊锡钳子": ["szczypce", "pliers", "钳"],
+    "梯凳": ["drabina", "ladder", "stool", "梯"],
+    "胶水": ["klej", "glue", "adhesive", "胶"],
+    "修复贴": ["repair patch", "lederreparatur", "皮革修复", "tile repair", "flicken", "latka",
+            "naprawy skóry", "krem do naprawy"],
+    "家具滑轮": ["möbelrollen", "furniture glider", "滑轮"],
+    "家具搬运带": ["möbeltragegurt", "moving straps", "搬运带"],
+    "家具护理": ["möbelpflege", "pielęgnacji mebli", "皮革保养", "家具护理"],
+    "门锁": ["türschloss", "zamek", "door lock", "schloss", "门锁", "密码锁"],
+    # ---- 车载 ----
+    "行车记录仪": ["dash cam", "autokamera", "行车记录"],
+    "车载HUD": ["autotacho", "hud", "抬头显示"],
+    "车载支架": ["uchwyt samochodowy", "phone mount", "car holder", "手机支架"],
+    "车载充电": ["ładowarka samochodowa", "car charger", "charger", "车充"],
+    "自行车配件": ["fahrrad", "rower", "bicycle", "bike", "自行车"],
+    "安全反光衣": ["sicherheitsweste", "hi-vis", "reflective vest", "反光衣"],
+    # ---- 3C电子 ----
+    "蓝牙耳机": ["kopfhörer", "słuchawki", "earbuds", "headphones", "headset", "耳机"],
+    "睡眠耳机": ["sleep headphones", "opaska na głowę ze słuchawk", "opaska", "睡眠耳"],
+    "音箱": ["głośnik", "speaker", "bluetooth box", "音箱"],
+    "麦克风": ["mikrofon", "microphone", "话筒"],
+    "K歌机": ["karaoke", "k歌"],
+    "收音机": ["hand crank radio", "radio", "kurbel", "notradio", "收音机"],
+    "对讲机": ["walkie", "interkom", "对讲"],
+    "数码相机": ["aparat", "digital camera", "相机"],
+    "摄像头": ["überwachungskamera", "surveillance", "security camera", "monitoring",
+            "mini kamera", "kamera", "camera", "摄像头"],
+    "数码相机": ["aparat", "digital camera", "相机"],
+    "WiFi放大器": ["wzmacniacz wi-fi", "wifi extender", "repeater", "wifi"],
+    "充电宝": ["power bank", "powerbank", "充电宝"],
+    "充电器": ["ładowarka", "charger", "usb ladegerät", "充电"],
+    "智能手表": ["smartwatch", "zegrek", "手表"],
+    "电子秤": ["waga", "scale", "skala", "秤"],
+    "计算器": ["kalkulator", "calculator", "计算"],
+    "激光笔": ["wskaznik laserowy", "laser pointer", "激光笔"],
+    "放大镜": ["lupa", "lupę", "szkło powiększające", "magnifying", "vergrößer", "放大镜"],
+    "望远镜": ["lornetka", "binoculars", "monokular", "monocular", "fernglas", "teleskop", "望远镜"],
+    "指南针": ["kompass", "compass", "指北", "指南针"],
+    "闹钟": ["budzik", "alarm clock", "闹钟"],
+    "验钞": ["banknot", "money detector", "验钞"],
+    # ---- 健康护理 ----
+    "矫姿带": ["korektor postawy", "haltungskorrektor", "posture corrector", "矫姿"],
+    "护膝": ["kolano", "knie", "knee", "kolanowego", "kolana", "护膝", "膝盖"],
+    "护肩": ["barku", "shoulder brace", "肩", "护肩"],
+    "护肘": ["okieć", "elbow", "护肘"],
+    "护腰带": ["pas lędźwiowy", "lumbar", "nieren", "护腰", "托腹带", "sciatic", "坐骨", "schwangerschaftsgürtel"],
+    "压力袜": ["kompressionsstrümpfe", "compression socks", "uciskowe", "skarpety uciskowe", "压力袜"],
+    "拇外翻矫正": ["bunion", "halux", "hallux", "拇外翻"],
+    "扁平足鞋垫": ["wkładki ortopedyczne", "płaskostopie", "flat feet", "足弓"],
+    "止鼾器": ["chrpani", "chrapani", "anti-snoring", "止鼾"],
+    "助行器": ["standing aid", "walker", "助行"],
+    "按摩器": ["massager", "masażer", "massage", "masujący", "按摩"],
+    "筋膜枪": ["massage gun", "pistola do masażu", "筋膜"],
+    "热敷眼罩": ["maska grzewcza na oczy", "eye mask", "heat eye", "眼罩"],
+    "睡眠眼罩": ["maska do spania", "masce do spania", "sleep mask", "blaspheme", "遮光眼罩", "眼罩睡眠"],
+    "助眠枕": ["reflux pillow", "反流枕"],
+    "加热护具": ["grzewcze", "beheizbar", "podgrzewane", "unterwaerm", "heated", "加热",
+             "thermo", "termo", "samochodowe 12v ogrzewacz"],
+    "暖宫腰带": ["menstru", "月经", "暖宫"],
+    "体温计": ["thermometer", "termometr", "体温"],
+    "指甲刀": ["nail clipper", "do paznokci", "nagel", "指甲"],
+    "理发器": ["trymer", "trimmer", "klipper", "haarschneide", "理发"],
+    "剃须刀": ["rasierer", "razor", "gilotyna", "剃须"],
+    "牙刷架": ["toothbrush holder", "zahnborstenhalter", "牙刷卡座"],
+    "电动牙刷": ["sonic toothbrush", "szczoteczka", "电动牙刷"],
+    "冲牙器": ["irrigator", "water flosser", "冲牙", "płukania jamy"],
+    "头皮按摩器": ["scalp massager", "kopfs", "头皮"],
+    "卷发工具": ["lockenwickler", "curler", "hair curl", "卷发"],
+    "头发护理": ["haarmaske", "hair spray", "spray do włos", "serum", "shampoo", "护发", "洗发"],
+    "干发帽": ["czepek na włosy", "dry hair cap", "干发"],
+    "面霜": ["krem do twarzy", "face cream", "cf", "面霜", "nickotynamid"],
+    "驱蚊手环": ["opaska przeciw owadom", "mosquito band", "驱蚊手环"],
+    "灭蚊灯": ["fly trap", "mosquito", "insect killer", "mücken", "pułapka na", "灭蚊", "捕蚊"],
+    "灭鼠器": ["myszy", "ratten", "mouse trap", "rat trap", "捕鼠", "灭鼠"],
+    "射击耳罩": ["gehörschutz", "schießsport", "耳罩降噪"],
+    "激光笔": ["wskaźnik", "wskaznik"],
+    "感应灯": ["czujnik ruchu", "czujnikiem ruchu", "感应灯"],
+    "防噎急救": ["zadławieniu", "heimlich", "防噎"],
+    "急救包": ["first aid", "apteczka", "急救"],
+    "药盒": ["pillenorganizer", "pill box", "tygodniowa", "药盒"],
+    # ---- 母婴儿童 ----
+    "婴儿枕": ["baby pillow", "noworodka", "niemowl", "婴儿枕"],
+    "婴儿背带": ["nosidełko", "baby carrier", "背带"],
+    "儿童坐便器": ["potty", "toilet seat", "training", "坐便"],
+    "安全门栏": ["travel gate", "barierka", "门栏"],
+    "蒙氏教具": ["montessori", "sensory", "tablica sensoryczna", "sensoryczna", "早教"],
+    "积木": ["klocki", "building blocks", "lego", "积木"],
+    "益智玩具": ["fidget", "puzzle", "strategy board", "dice game", "spinner", "学习玩具",
+             "math游戏", "mathe", "益智"],
+    "玩具车": ["rc", "ferngesteuert", "zdalnie sterowany", "remote control", "spielzeugauto",
+           "samochód", "excavator", "koparka", "kletterauto", "kapsułka", "łódź", "boat",
+           "hubschrauber", "helicopter", "plane", "flugzeug", "aeroplane", "toyota", "遥控"],
+    "方向盘玩具": ["lenkrad", " steering wheel toy", "方向盘"],
+    "逗猫玩具": ["cat toy", "flapping feather", "interactive cat", "逗猫"],
+    "玩具火车": ["eisenbahn", "train toy", "kolejka", "火车"],
+    "秋千": ["schaukel", "cocoon swing", "sensory swing", "吊椅", "秋千"],
+    "水玩具": ["splash mat", "water slide", "piaskownica", "water and sand", "play table",
+            "戏水", "滑梯"],
+    "睡衣": ["piżama", "pizama", "schlafanzug", "pyjama", "睡衣"],
+    "演出服": ["kostüm", "cosplay", "halloween", "santa claus", "vampir", "服装演出", "cos"],
+    # ---- 宠物 ----
+    "狗胸背带": ["geschirr", "harness", "胸背"],
+    "宠物服装": ["hundemantel", "hundeparka", "ubranka", "pet clothing", "dog sweater", "kurtka dla psa",
+             "dla psa", "宠物服", "狗衣"],
+    "宠物窝": ["legowisko", "pet bed", "kennel", "猫窝", "狗窝"],
+    "喂食器": ["feeder", "karmnik", "fountain", "trink", "自动喂", "喂食"],
+    "喂鸟器": ["bird feeder", "domek dla ptaków", " Vogelhaus", "鸟屋"],
+    "止吠器": ["bark stopper", "antyszczek", "止吠"],
+    "训狗项圈": ["halsband", "dog collar", "elektrisches hundehalsband", "项圈"],
+    "宠物耳罩": ["hearing protectors for", "dog ear", "宠物耳"],
+    "宠物剃毛器": ["trymer do sierści", "maszynka do strzyżenia", "pet clipper", "宠物剃"],
+    "宠物洁牙": ["dental", " Teeth Cleaning Device for Canine", "dog tooth", "宠物牙"],
+    "驱虫驱鸟": ["bird repeller", "bird deterrent", "ultraschall", "ultrasonic", "zwierzęta odstrasz",
+             "repeller", "deterrent", "驱鸟", "驱虫"],
+    "拾便器": ["zbieracz", "poop", "拾便"],
+    # ---- 户外园艺 ----
+    "吊床": ["hammock", "吊床"],
+    "帐篷": ["zelt", "namiot", "tent", "帐篷"],
+    "睡袋": ["sleeping bag", "śpiwór", "睡袋"],
+    "登山杖": ["hiking poles", "trekking", "krkije", "登山杖"],
+    "野餐": ["picnic", "plażowa", "matę", "沙滩垫"],
+    "水管": ["garden hose", "wąż", "水管", " ogrod"],
+    "洒水器": ["sprinkler", "raszcz", "洒水"],
+    "园艺工具": ["gartengerät", "garden tool", "scraper for weeds", "grubka", "除草", "园艺"],
+    "花盆": ["doniczka", "planter", "vase", "花盆"],
+    "泡泡机": ["bubble machine", "bańki", "泡泡"],
+    "风筝": ["drachen", "latawiec", "kite", "风筝"],
+    "戏水喷泉": ["springwater", "water fountain", "戏水"],
+    # ---- 洗漱浴室 ----
     "花洒": ["duschkopf", "prysznic", "shower head", "花洒"],
+    "浴巾架": ["handtuchhalter", "ręcznik holder", "毛巾架"],
+    "牙刷架": ["zahnborstenhalter", "toothbrush holder", "牙刷卡座"],
+    "肥皂盒": ["seifendose", "soap dish", "肥皂"],
+    # ---- 其他 ----
+    "雨伞": ["regenschirm", "parasol", "umbrella", "雨伞"],
+    "雨靴": ["stiefel wasserdicht", "rain boots", "gummi", "雨靴"],
+    "存钱罐": ["skarbonka", "money box", "piggy", "存钱罐"],
+    "香薰机": ["diffusor", "aroma", "humidifier", "nawilżacz", "香薰", "加湿"],
+    "蜡烛": ["kerze", "swieca", "candle", "蜡烛"],
+    "相框": ["foto", "ramka", "obraz", "相框", "画框"],
+    "墙贴": ["aufkleber", "wall sticker", "naklejka", "墙贴"],
+    "门帘": ["door curtain"],
+    "钥匙扣": ["keychain", "brelok", "karabielski", "钥匙"],
+    "笔": ["pen", "długopis", "stift", "pióro", "笔"],
+    "笔记本": ["notes", "zeszyt", "notbook", "笔记本"],
+    "背包挂饰": ["charm", "breloczek", "挂饰"],
+    "3D打印笔": ["3d pen", "3d-stift", "dlugopis 3d", "gravierstift", "3d打印", "雕刻笔", "do grawerowania"],
+    "熨烫": ["bryczes", " żelazko", "iron", "熨斗"],
+    "缝纫": ["nähmaschine", "maszyna do szycia", "sewing", "缝纫"],
+    "毛球修剪器": ["golarka do kłaczków", "lint remover", "fabri", "毛球"],
+    "加湿器": ["luftbefeuchter", "humidifier", "加湿器"],
+    "除湿": ["dehumidifier", "osuszacz", "除湿"],
+    "净化器": ["luftreiniger", "air purifier", "oczyszczacz", "净化"],
+    "电风扇": ["klimatyzator", "air conditioner", "空调扇"],
+    "洗衣凝珠": ["kapsułki do prania"],
+    "晾衣架": ["stang", "wieszak na ubrania", "晾衣"],
+    "熨衣板": ["bügelbrett", "ironing board"],
+    "烫发器": ["prostownica", "flat iron", "styl", "夹板"],
+    "化妆镜": ["lusterko", "makeup mirror", "化妆镜"],
 }
+
+
+def cn_of(text):
+    """标题 → 中文品名（第一个命中），未识别返回 ''。"""
+    t = str(text or "").lower()
+    if not t:
+        return ""
+    for cat, words in CATEGORY_WORDS.items():
+        for w in words:
+            if w in t:
+                return cat
+    return ""
+
+
+_CN_MEMO = {}
+
+
+def cn_of_names(names):
+    """一组标题里逐个试，返回第一个识别出的中文品名（memo 缓存加速）。"""
+    key = "\x01".join(str(n or "")[:120] for n in (names or [])[:4])
+    if not key:
+        return ""
+    hit = _CN_MEMO.get(key)
+    if hit is not None:
+        return hit
+    c = ""
+    for n in names or []:
+        c = cn_of(n)
+        if c:
+            break
+    _CN_MEMO[key] = c
+    return c
 
 
 def _cats(text):
@@ -600,6 +875,7 @@ def find_similar(target_names, target_img_url, pool, topn=3, min_score=0.50,
     twhite = _white_of(tsig) if tsig else 0.0
     turl = norm(target_img_url)
     tnames_set = set(target_names)
+    tcn = cn_of_names(target_names)          # 目标中文品名（粗筛主键）
 
     scored = []
     for x in pool:
@@ -618,6 +894,13 @@ def find_similar(target_names, target_img_url, pool, topn=3, min_score=0.50,
         if x.get("names") and (set(x["names"]) & tnames_set):
             continue
         ns = max((nsim(tname, n) for n in x.get("names", [])), default=0.0)
+        # ---- 中文品名粗筛：同名才精比；跨品类必须标题高度相似 ----
+        xcn = x.get("cn") or cn_of_names(x.get("names", []))
+        if tcn:
+            if xcn and xcn != tcn and ns < 0.62:
+                continue
+            if not xcn and ns < 0.45:
+                continue
         xsig, xpath = sig_for_url(x.get("img"))
         if xsig is None and xpath is not None:
             xsig = img_sig(xpath)
@@ -685,6 +968,7 @@ def find_similar(target_names, target_img_url, pool, topn=3, min_score=0.50,
             "row": x.get("row"),
             "name": x.get("names", [""])[0],
             "names": x.get("names", []),
+            "cn": xcn,
             "url": x.get("url", ""),
             "inq": x.get("inq", ""),
             "spu": x.get("spu", ""),

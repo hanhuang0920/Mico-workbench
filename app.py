@@ -668,6 +668,8 @@ def esc(s):
 
 def product_card(p):
     name = p["names"][0] if p["names"] else ""
+    cn = similar.cn_of_names(p.get("names") or [])
+    cnb = ('<b class="cnbadge">%s</b>' % esc(cn)) if cn else ""
     extra = len(p["names"]) - 1
     if p.get("multi_spu"):
         spu_html = "".join('<b class="spu multi">%s</b>' % esc(s) for s in p["spus"])
@@ -680,18 +682,19 @@ def product_card(p):
     link = ('<a href="%s" target="_blank" rel="noopener">站点</a>' % esc(p["url"])) if p["url"].startswith("http") else ""
     l1688 = ('<a href="%s" target="_blank" rel="noopener">1688</a>' % esc(p["u1688"][0])) if p["u1688"] else ""
     return (
-        '<div class="pc" data-n="%s" data-s="%s" data-i="%s" data-m="%s" data-p="%s" data-q="%s">'
+        '<div class="pc" data-n="%s" data-s="%s" data-i="%s" data-m="%s" data-p="%s" data-q="%s" data-cn="%s">'
         '<div class="pi">%s</div><div class="pb">'
-        '<div class="pn" title="%s">%s%s</div>'
+        '<div class="pn" title="%s">%s%s %s</div>'
         '<div class="ps">%s</div>'
         '<div class="pf"><span class="iq">%s</span></div>'
         '<div class="pl">%s %s</div></div></div>' % (
-            esc(name.lower()), esc(p["spu"].lower()), esc(p["inq"].lower()),
+            esc(name.lower() + " " + cn), esc(p["spu"].lower()), esc(p["inq"].lower()),
             "1" if p.get("multi_spu") else "0",
             "0" if p["spu"] else "1",
             "1" if not p["inq"] else "0",
+            esc(cn),
             img, esc(" ／ ".join(p["names"])), esc(name[:90]),
-            ('<i>+%d</i>' % extra) if extra > 0 else "",
+            ('<i>+%d</i>' % extra) if extra > 0 else "", cnb,
             spu_html, esc(p["inq"][-14:] if p["inq"] else "—"), link, l1688))
 
 
@@ -717,9 +720,11 @@ def pair_card(i, p):
                  'title="%s" class="siteurl">&#127761; %s</a></div>'
                  % (esc(u), esc(u), esc(short)))
     l1688 = '<div class="links">%s</div>' % rows
+    cn = similar.cn_of_names(p.get("names") or [])
+    cnb = ('<b class="cnbadge">%s</b>' % esc(cn)) if cn else ""
     return (
-        '<div class="paircard" data-inq="%s" data-url="%s"><div class="pi">%s</div><div class="pb">'
-        '<div class="pn">%s</div>'
+        '<div class="paircard" data-inq="%s" data-url="%s" data-cn="%s"><div class="pi">%s</div><div class="pb">'
+        '<div class="pn">%s %s</div>'
         '<div class="ps"><span class="iq">%s</span></div>'
         '%s'
         '<div class="inputrow"><label>SPU</label>'
@@ -729,8 +734,8 @@ def pair_card(i, p):
         '<button class="simbtn savebtn" onclick="saveOne(%d)">保存</button>'
         '</div>'
         '</div></div>' % (
-            esc(p.get("inq") or ""), esc(u),
-            img, esc(p["names"][0][:84] if p["names"] else ""),
+            esc(p.get("inq") or ""), esc(u), esc(cn),
+            img, esc(p["names"][0][:84] if p["names"] else ""), cnb,
             esc((p.get("inq") or "")[-14:]), l1688, i, esc(cur),
             " done" if p.get("mark") == "same" else "", i, i))
 
@@ -738,11 +743,13 @@ def pair_card(i, p):
 def news_card(i, p):
     img = ('<img src="%s" loading="lazy">' % esc(p["img"])) if p.get("img") else '<span class="nopic">无图</span>'
     checked = "checked" if p.get("checked", True) else ""
+    cn = similar.cn_of_names(p.get("names") or [p.get("name", "")])
+    cnb = ('<b class="cnbadge">%s</b>' % esc(cn)) if cn else ""
     return (
         '<div class="newscard" data-idx="%d">'
         '<label class="chk"><input type="checkbox" data-idx="%d" %s></label>'
         '<div class="pi">%s</div><div class="pb">'
-        '<div class="pn" title="%s">%s</div>'
+        '<div class="pn" title="%s">%s %s</div>'
         '<div class="cat3">'
         '<input class="ci" data-idx="%d" data-k="l1" placeholder="一级" value="%s">'
         '<input class="ci" data-idx="%d" data-k="l2" placeholder="二级" value="%s">'
@@ -752,7 +759,7 @@ def news_card(i, p):
         '<button class="simbtn%s" onclick="sim(%d,\'news\')">相似款</button></div>'
         '</div></div>' % (
             i, i, checked, img,
-            esc(p.get("name", "")), esc(p.get("name", "")[:80]),
+            esc(p.get("name", "")), esc(p.get("name", "")[:80]), cnb,
             i, esc(p.get("l1", "")), i, esc(p.get("l2", "")), i, esc(p.get("l3", "")),
             esc(p.get("url", "")),
             " done" if p.get("mark") == "same" else "", i))
@@ -957,6 +964,9 @@ main{max-width:1560px;margin:0 auto;padding:16px 22px 60px}
   border:1px solid #99f6e4;border-radius:5px;padding:3px 8px;max-width:100%;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block}
 .siteurl:hover{background:#ccfbf1;text-decoration:none}
+.cnbadge{display:inline-block;font-size:10.5px;font-weight:600;color:#1d4ed8;
+  background:#dbeafe;border:1px solid #bfdbfe;border-radius:4px;padding:1px 6px;
+  vertical-align:1px;margin-left:2px}
 .simbtn.done{background:#d1fae5;border-color:#6ee7b7;color:#047857}
 .modal{position:fixed;inset:0;background:rgba(15,23,42,.62);z-index:200;
  display:none;align-items:center;justify-content:center;padding:20px}
@@ -1394,7 +1404,7 @@ function sim(idx,kind){
         h+='<div class="cmp">';
         h+='<div class="cmpimg">'+(c.img?'<img src="'+esc2(c.img)+'">':'<span class="nopic">无图</span>')+'</div>';
         h+='<div class="cmpinfo">';
-        h+='<div class="cn">'+esc2(c.name)+'</div>';
+        h+='<div class="cn">'+esc2(c.name)+(c.cn?' <b class="cnbadge">'+esc2(c.cn)+'</b>':'')+'</div>';
         h+='<div class="cs">'+spuHtml(c)+'</div>';
         h+='<div style="font-size:11px;color:#94a3b8">'
            +(c.dist!==null?('图距 '+c.dist+' · '):'')
@@ -1704,7 +1714,8 @@ class Handler(BaseHTTPRequestHandler):
                     c["level_txt"] = similar.LEVEL_TXT.get(c["level"], "")
                     out.append(c)
                 self._send(200, json.dumps(
-                    {"ok": True, "target": {"names": names, "img": t.get("img", "")},
+                    {"ok": True, "target": {"names": names, "img": t.get("img", ""),
+                                            "cn": similar.cn_of_names(names)},
                      "candidates": out}, ensure_ascii=False))
                 return
 
