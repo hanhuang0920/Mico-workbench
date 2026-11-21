@@ -150,7 +150,9 @@ def sync_from_excel():
         iq = str(wi.cell(row=r, column=4).value or "").strip()
         spu_raw = re.sub(r"\s+", " ", str(wi.cell(row=r, column=5).value or "")).strip()
         spus = [s for s in re.split(r"[,\s/;]+", spu_raw) if s]
-        u1688 = [x.strip() for x in str(wi.cell(row=r, column=6).value or "").split("\n") if x.strip().startswith("http")]
+        u1688 = sb.uniq_urls([
+            x.strip() for x in str(wi.cell(row=r, column=6).value or "").split("\n")
+            if x.strip().startswith("http")])
         m = re.search(r"INQ-(\d+)", iq)
         products.append({
             "row": r, "names": names, "url": url, "inq": iq,
@@ -195,78 +197,99 @@ def read_order(path):
 
 
 def process_order(path):
+    """导入订单：合并更新「待采集配对」和「未询盘新品」。
+    - 已存在的记录：更新产品信息（名称/图片/1688/SPU），保留已填 SPU、分类、勾选、标记
+    - 新出现的商品：追加
+    - 不在本次订单里的旧记录：保留（不删除）
+    """
     d = load_data()
     if not d["products"]:
         sync_from_excel()
         d = load_data()
     inq_by_url = {norm(p["url"]): p for p in d["products"]}
     prods = read_order(path)
-    pairs, not_inq, with_sku = [], 0, 0
-    # 继承上一次上传的人工填写（重复上传不洗掉已填 SPU / 标记）
-    old_pairs = {}
+    today = datetime.date.today().isoformat()
+
+    def pkey(rec):
+        return rec.get("inq") or norm(rec.get("url"))
+
+    pairs_map, pairs_order = {}, []
     for op in d.get("pairs", []):
-        if op.get("inq"):
-            old_pairs[op["inq"]] = op
-        if op.get("url"):
-            old_pairs[norm(op["url"])] = op
+        k = pkey(op)
+        if k and k not in pairs_map:
+            pairs_map[k] = dict(op)
+            pairs_order.append(k)
+    news_map, news_order = {}, []
+    for op in d.get("news", []):
+        k = norm(op.get("url"))
+        if k and k not in news_map:
+            news_map[k] = dict(op)
+            news_order.append(k)
+
+    added_pairs = added_news = updated = not_inq = with_sku = 0
     for k, p in prods.items():
         hit = inq_by_url.get(k)
         if not hit:
+            # ---- 未询盘 → 新品 ----
             not_inq += 1
+            if k in news_map:
+                rec = news_map[k]
+                rec["names"] = p["names"] or rec.get("names")
+                rec["img"] = p["img"] or rec.get("img") or ""
+                rec["skus"] = p["skus"] or rec.get("skus") or []
+                updated += 1
+            else:
+                news_map[k] = {
+                    "url": p["url"], "name": p["names"][0] if p["names"] else "",
+                    "names": p["names"], "img": p["img"], "skus": p["skus"],
+                    "l1": "", "l2": "", "l3": "", "filled_spu": "",
+                    "mark": None, "checked": True,
+                }
+                news_order.append(k)
+                added_news += 1
             continue
         if p["skus"]:
             with_sku += 1
             continue
-        prev = old_pairs.get(hit["inq"]) or old_pairs.get(k) or {}
-        pairs.append({
-            "url": p["url"],
-            "names": hit["names"] + [n for n in p["names"] if n not in hit["names"]],
-            "inq": hit["inq"], "spu": hit["spu"],
-            "u1688": hit["u1688"], "img": hit["img"] or p["img"],
-            "filled_spu": prev.get("filled_spu") or "",
-            "mark": prev.get("mark"), "note": prev.get("note") or "",
-        })
-    pairs.sort(key=lambda x: (0 if x["spu"] else 1, x["inq"]))
-    d["pairs"] = pairs
-    d["pairs_date"] = datetime.date.today().isoformat()
-    if sb.enabled():
-        try:
-            sb.save_pairs(d["pairs_date"], pairs)
-            invalidate_cache()
-        except Exception as e:
-            print("[Supabase 配对写入失败] %s" % e)
+        # ---- 已询盘无 SKU → 待采集配对 ----
+        ik = hit["inq"] or k
+        rec = pairs_map.get(ik) or pairs_map.get(k)
+        merged_names = hit["names"] + [n for n in p["names"] if n not in hit["names"]]
+        if rec:
+            rec["names"] = merged_names
+            rec["url"] = p["url"] or rec.get("url") or ""
+            rec["spu"] = hit["spu"] or rec.get("spu") or ""
+            rec["u1688"] = hit["u1688"] or rec.get("u1688") or []
+            rec["img"] = hit["img"] or p["img"] or rec.get("img") or ""
+            updated += 1
+        else:
+            pairs_map[ik] = {
+                "url": p["url"], "names": merged_names,
+                "inq": hit["inq"] or "", "spu": hit["spu"] or "",
+                "u1688": hit["u1688"] or [], "img": hit["img"] or p["img"] or "",
+                "filled_spu": "", "mark": None, "note": "",
+            }
+            pairs_order.append(ik)
+            added_pairs += 1
 
-    # 未询盘 → 询盘需求表候选（同样继承已填分类 / SPU / 勾选状态）
-    old_news = {}
-    for op in d.get("news", []):
-        if op.get("url"):
-            old_news[norm(op["url"])] = op
-    news = []
-    for k, p in prods.items():
-        if k in inq_by_url:
-            continue
-        nm = p["names"][0] if p["names"] else ""
-        prev = old_news.get(k) or {}
-        news.append({
-            "url": p["url"], "name": nm, "names": p["names"],
-            "img": p["img"], "skus": p["skus"],
-            "l1": prev.get("l1", "") or "", "l2": prev.get("l2", "") or "",
-            "l3": prev.get("l3", "") or "",
-            "filled_spu": prev.get("filled_spu", "") or "",
-            "mark": prev.get("mark"),
-            "checked": prev.get("checked", True),
-        })
+    pairs = [pairs_map[k] for k in pairs_order]
+    pairs.sort(key=lambda x: (0 if x.get("spu") else 1, x.get("inq") or ""))
+    news = [news_map[k] for k in news_order]
+    d["pairs"] = pairs
     d["news"] = news
+    d["pairs_date"] = today
     if sb.enabled():
         try:
-            sb.save_news(d["pairs_date"], news)
+            sb.save_pairs(today, pairs)
+            sb.save_news(today, news)
             invalidate_cache()
         except Exception as e:
-            print("[Supabase 新品写入失败] %s" % e)
+            print("[Supabase 写入失败] %s" % e)
     save_data(d)
     return {"ok": True, "total": len(prods), "inq": len(prods) - not_inq,
             "with_sku": with_sku, "pairs": len(pairs), "not_inq": not_inq,
-            "news": len(news)}
+            "news": len(news), "added_pairs": added_pairs,
+            "added_news": added_news, "updated": updated}
 
 
 def import_quotes(path):
@@ -538,7 +561,8 @@ def export_pairs():
         ws.cell(row=r, column=3, value=p["url"])
         ws.cell(row=r, column=4, value=p["inq"] or None)
         ws.cell(row=r, column=5, value=p.get("filled_spu") or p.get("spu") or None)
-        ws.cell(row=r, column=6, value="\n".join(p["u1688"]) if p["u1688"] else None)
+        _u = sb.uniq_urls(p.get("u1688"))
+        ws.cell(row=r, column=6, value="\n".join(_u) if _u else None)
         for c in range(1, 7):
             cell = ws.cell(row=r, column=c)
             cell.alignment = Alignment(vertical="center", wrap_text=True)
@@ -805,7 +829,7 @@ def product_card(p):
 def pair_card(i, p):
     img = ('<img src="%s" loading="lazy">' % esc(p["img"])) if p["img"] else '<span class="nopic">无图</span>'
     cur = p.get("filled_spu") or p.get("spu") or ""
-    links = p.get("u1688") or []
+    links = sb.uniq_urls(p.get("u1688"))
     if links:
         rows = "".join(
             '<div class="l1688"><input class="i1688" readonly value="%s" '
@@ -1874,15 +1898,16 @@ class Handler(BaseHTTPRequestHandler):
                      "candidates": out}, ensure_ascii=False))
                 return
 
-            # 未询盘新品：手动保存 SPU
+            # 未询盘新品：手动保存 SPU → 有 SPU 后移入「待采集配对」
             if self.path == "/api/save-news-spu":
                 payload = json.loads(raw.decode("utf-8"))
                 arr = payload.get("items", [])
                 d = load_data()
                 news = d.get("news", [])
+                pairs = d.get("pairs", [])
                 ok_n = 0
                 errs = []
-                removed_ids = []
+                moved_ids = []
                 for x in arr:
                     i2 = x.get("idx")
                     spu = (x.get("spu") or "").strip()
@@ -1901,29 +1926,48 @@ class Handler(BaseHTTPRequestHandler):
                         except Exception as e:
                             errs.append(str(e)[:120])
                             continue
-                    # 填了 SPU = 货源已确认 → 剔除出未询盘新品
+                    # 有 SPU = 货源已确认 → 移入待采集配对
                     if spu:
+                        u = norm(item.get("url"))
+                        dup = any(norm(p.get("url")) == u for p in pairs if p.get("url"))
+                        if not dup and u:
+                            pairs.append({
+                                "url": item.get("url") or "",
+                                "names": item.get("names") or [item.get("name", "")],
+                                "inq": item.get("inq") or "",
+                                "spu": spu, "u1688": item.get("u1688") or [],
+                                "img": item.get("img") or "",
+                                "filled_spu": spu, "mark": None, "note": "",
+                                "l1": item.get("l1") or "", "l2": item.get("l2") or "",
+                                "l3": item.get("l3") or "",
+                            })
                         if sb.enabled() and item.get("id"):
                             try:
                                 sb.delete("news", {"id": item["id"]})
-                                sb.log_op(user, "news_spu_removed",
+                            except Exception as e:
+                                errs.append("移出新品失败:%s" % str(e)[:90])
+                                continue
+                        if sb.enabled():
+                            try:
+                                sb.log_op(user, "news_spu_to_pairs",
                                           {"name": (item.get("names") or [item.get("name", "")])[0][:80],
                                            "spu": spu, "url": item.get("url") or ""})
-                                removed_ids.append(item["id"])
-                            except Exception as e:
-                                errs.append("剔除失败:%s" % str(e)[:90])
-                drop = set()
-                for x in arr:
-                    i2 = x.get("idx")
-                    if isinstance(i2, int) and 0 <= i2 < len(news) and news[i2].get("id") in removed_ids:
-                        drop.add(i2)
-                if drop:
-                    news = [n for j, n in enumerate(news) if j not in drop]
+                            except Exception:
+                                pass
+                        moved_ids.append(item.get("id"))
+                if moved_ids:
+                    news = [n for n in news if n.get("id") not in moved_ids]
                     d["news"] = news
+                    d["pairs"] = pairs
                 save_data(d)
+                if sb.enabled() and moved_ids:
+                    try:
+                        sb.save_pairs(d.get("pairs_date") or datetime.date.today().isoformat(), pairs)
+                    except Exception as e:
+                        errs.append("配对写入失败:%s" % str(e)[:90])
                 invalidate_cache()
                 self._send(200, json.dumps(
-                    {"ok": not errs, "saved": ok_n, "removed": len(removed_ids),
+                    {"ok": not errs, "saved": ok_n, "moved": len(moved_ids),
                      "errors": errs[:2]},
                     ensure_ascii=False))
                 return

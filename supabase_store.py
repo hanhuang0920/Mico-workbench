@@ -114,6 +114,21 @@ def split_spu(raw):
     return [x for x in re.split(r"[,\s/;]+", s) if x]
 
 
+def uniq_urls(arr):
+    """链接数组去重（按规范化后的 URL，保留首次出现的顺序与原写法）。"""
+    out, seen = [], set()
+    for u in arr or []:
+        s = str(u or "").strip()
+        if not s:
+            continue
+        k = norm_url(s)
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(s)
+    return out
+
+
 # ---------- 业务：产品 ----------
 def upsert_products(items):
     """items: [{row, names, url, inq, batch, spu, spus, u1688, img}]"""
@@ -128,7 +143,7 @@ def upsert_products(items):
             "batch": p.get("batch") or None,
             "spu": p.get("spu") or None,
             "spus": p.get("spus") or split_spu(p.get("spu")),
-            "u1688": p.get("u1688") or [],
+            "u1688": uniq_urls(p.get("u1688")),
             "img": p.get("img") or None,
         })
     # 分批，避免单次请求过大
@@ -173,7 +188,7 @@ def save_pairs(date_str, items):
             "inq": p.get("inq") or None,
             "spu": p.get("spu") or None,
             "filled_spu": p.get("filled_spu") or None,
-            "u1688": p.get("u1688") or [],
+            "u1688": uniq_urls(p.get("u1688")),
             "img": p.get("img") or None,
             "note": p.get("note") or None,
         })
