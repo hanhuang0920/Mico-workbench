@@ -207,6 +207,27 @@ def process_order(path):
         sync_from_excel()
         d = load_data()
     inq_by_url = {norm(p["url"]): p for p in d["products"]}
+    inq_by_inq = {p["inq"]: p for p in d["products"] if p.get("inq")}
+    # 标题近似匹配：订单里的名称与库里的名称高度相似也算命中（防链接不一致）
+    libs = [p for p in d["products"] if p.get("url")]
+
+    def lib_hit(k, p):
+        h = inq_by_url.get(k)
+        if h:
+            return h
+        nm = (p.get("names") or [""])[0].strip()
+        if nm:
+            import difflib
+            best, bestr = None, 0.0
+            for lp in libs:
+                for ln in (lp.get("names") or []):
+                    r = difflib.SequenceMatcher(None, nm.lower()[:120], (ln or "").lower()[:120]).ratio()
+                    if r > bestr:
+                        best, bestr = lp, r
+            if bestr >= 0.86:
+                return best
+        return None
+
     prods = read_order(path)
     today = datetime.date.today().isoformat()
 
@@ -228,7 +249,7 @@ def process_order(path):
     added_pairs = added_news = updated = not_inq = with_sku = 0
     pairs_out, news_out = [], []
     for k, p in prods.items():
-        hit = inq_by_url.get(k)
+        hit = lib_hit(k, p)
         if not hit:
             # ---- 未询盘 → 新品（只在本次订单内）----
             not_inq += 1
