@@ -620,7 +620,7 @@ CATEGORY_WORDS = {
     # ---- 灯具电工 ----
     "小夜灯": ["nachtlicht", "lampka nocna", "night light", "夜灯"],
     "壁灯": ["wandleuchte", "kinkiet", "wall lamp", "壁灯"],
-    "台灯": ["lampa stołowa", "desk lamp", "biurko", "台灯"],
+    "台灯": ["lampa stołowa", "desk lamp", "nachttischlampe", "台灯"],
     "吊灯": ["pendant", "żyrandol", "吊灯"],
     "头灯": ["czołowa", "headlamp", "head torch", "头灯"],
     "手电筒": ["latarka", "taschenlampe", "flashlight", "torch", "手电筒", "手电"],

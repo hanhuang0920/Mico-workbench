@@ -391,6 +391,22 @@ def import_quotes(path):
 
     sync_from_excel()
 
+    # 新品同步到 Supabase products 表（否则云端产品库刷新后看不到）
+    if sb.enabled() and todo:
+        try:
+            items = []
+            for q in todo:
+                m = re.search(r"INQ-(\d+)", q["inq"] or "")
+                items.append({
+                    "row": None, "names": [q["name"]], "url": q["url"],
+                    "inq": q["inq"], "batch": m.group(1)[-4:] if m else "",
+                    "spu": "", "spus": [], "u1688": q["links"], "img": q["img"],
+                })
+            sb.upsert_products(items)
+            invalidate_cache()
+        except Exception as e:
+            print("[Supabase 新品同步失败]", e)
+
     pa, nr = quote_followup(quotes)
     return {"ok": True, "added": len(todo), "total": len(quotes),
             "imgs": len(got), "backup": bak, "total_rows": total,
@@ -1454,8 +1470,12 @@ function upq(file){
   fetch('/api/upload-quote',{method:'POST',body:fd}).then(function(r){return r.json()})
   .then(function(d){
     if(!d.ok){toast('失败：'+(d.msg||''));return}
-    if(d.added===0){toast('没有新产品需要导入（询盘文件共 '+d.total+' 款）');return}
-    toast('已导入 '+d.added+' 款新品（图片 '+d.imgs+' 张），已备份');
+    var m='';
+    if(d.pairs_added)m='已加入待采集配对 '+d.pairs_added+' 款';
+    if(d.news_removed)m+=(m?'，':'')+'从新品列表剔除 '+d.news_removed+' 款';
+    if(d.added>0)m='导入 '+d.added+' 款新品'+(m?'，'+m:'');
+    if(!m)m='询盘文件 '+d.total+' 款均已处理过';
+    toast(m);
     setTimeout(function(){location.reload()},1400);
   }).catch(function(e){toast('出错：'+e)});
 }
