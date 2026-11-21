@@ -517,6 +517,10 @@ def nsim(a, b):
 # ===== 跨语言产品品类词表（德/英/波兰语词根 → 中文品名） =====
 # 顺序 = 优先级：具体品类在前，宽泛品类在后；cn_of() 取第一个命中。
 CATEGORY_WORDS = {
+    # ---- 宠物穿戴（最先判，含 dla psa / Hund 等词，防止被人类服装抢走）----
+    "宠物服装": ["dla psa", "dla kota", "hundemantel", "hundeparka", "hundejacke", "ubranka",
+             "pet clothing", "dog sweater", "dog jacket", "kurtka dla psa", "parka dla psa",
+             "宠物服", "狗衣", "狗雨衣"],
     # ---- 服装（具体在前）----
     "羊绒开衫": ["kaschmir-cardigan", "cardigan", "kardigan"],
     "羊绒衫": ["kaschmir pullover", "kaschmirpullover", "kaszmir pullover", "cashmere sweater",
@@ -531,10 +535,11 @@ CATEGORY_WORDS = {
     "马甲背心": ["kamizelka", "weste", "vest"],
     "派克大衣": ["parka", "派克"],
     "雨衣雨披": ["regenjacke", "raincoat", "przeciwdeszczowa", "poncho", "雨衣"],
+    "皮衣": ["skórzana kurtka", "kurtka damska skórzana", "kurtka skórzana",
+          "lederjacke", "leather jacket"],
     "冲锋衣外套": ["winddichte outdoorjacke", "wiatroszczelna", "outdoorjacke", "jacke",
                "kurtka", "jack", "外套", "夹克", "steppmantel", "mantel", "coat"],
     "抓绒衣": ["fleecejacke", "fleece jacket"],
-    "皮衣": ["skórzana kurtka", "lederjacke", "leather jacket"],
     "斗篷毯": ["kapuzendecke", "poncho", "cape"],
     "披肩": ["shawl", "pashmina", "chusta", "披肩"],
     "打底裤": ["legginsy", "leggings", "leggings", "winterleggings", "fleeceleggings", "打底裤"],
@@ -571,8 +576,9 @@ CATEGORY_WORDS = {
     "收纳包": ["organiser", "organizer bag", "收纳包"],
     "防火文件袋": ["fireproof", "document bag"],
     # ---- 家居床品 ----
-    "枕头": ["poduszka do snu", "do spania", "poduszka ortopedyczna", "poduszka podr", "neck pillow",
-        "na szyję", "旅行枕", "U型枕", "headrest", "pillow", "kissen", "枕头"],
+    "婴儿枕": ["baby pillow", "noworodka", "niemowląt", "pozycjonująca", "reflux pillow", "反流枕", "婴儿枕"],
+    "枕头": ["poduszka do snu", "poduszka ortopedyczna", "poduszka podr", "neck pillow",
+        "na szyję", "旅行枕", "U型枕", "headrest", "pillow", "kissen", "poduszka", "枕头"],
     "抱枕靠垫": ["throw pillow", "dekorative poduszka", "抱枕", "靠垫"],
     "床垫保护罩": ["mattress", "matraze", "床罩"],
     "毯子": ["koc", "blanket", "decke", "毯"],
@@ -707,12 +713,16 @@ CATEGORY_WORDS = {
     "指甲刀": ["nail clipper", "do paznokci", "nagel", "指甲"],
     "理发器": ["trymer", "trimmer", "klipper", "haarschneide", "理发"],
     "剃须刀": ["rasierer", "razor", "gilotyna", "剃须"],
-    "牙刷架": ["toothbrush holder", "zahnborstenhalter", "牙刷卡座"],
+    "牙刷架": ["toothbrush holder", "zahnborstenhalter", "uchwyt na szczoteczki", "szczoteczki do zębów", "牙刷卡座"],
     "电动牙刷": ["sonic toothbrush", "szczoteczka", "电动牙刷"],
+    "金属探测器": ["metal detector", "detektor metali", "gold and treasure", "金属探测", "探金"],
+    "猫抓板": ["scratching", "cat scratcher", "drapak", "猫抓"],
+    "磨粉机": ["grain mill", "flour grinder", "młynek", "磨粉机", "谷物研磨"],
     "冲牙器": ["irrigator", "water flosser", "冲牙", "płukania jamy"],
     "头皮按摩器": ["scalp massager", "kopfs", "头皮"],
     "卷发工具": ["lockenwickler", "curler", "hair curl", "卷发"],
-    "头发护理": ["haarmaske", "hair spray", "spray do włos", "serum", "shampoo", "护发", "洗发"],
+    "发膜": ["haarmaske", "hair mask", "maska do włosów", "kur do włosów", "发膜", "焗油"],
+    "头发护理": ["hair spray", "spray do włos", "serum", "shampoo", "护发", "洗发"],
     "干发帽": ["czepek na włosy", "dry hair cap", "干发"],
     "面霜": ["krem do twarzy", "face cream", "cf", "面霜", "nickotynamid"],
     "驱蚊手环": ["opaska przeciw owadom", "mosquito band", "驱蚊手环"],
@@ -746,8 +756,6 @@ CATEGORY_WORDS = {
     "演出服": ["kostüm", "cosplay", "halloween", "santa claus", "vampir", "服装演出", "cos"],
     # ---- 宠物 ----
     "狗胸背带": ["geschirr", "harness", "胸背"],
-    "宠物服装": ["hundemantel", "hundeparka", "ubranka", "pet clothing", "dog sweater", "kurtka dla psa",
-             "dla psa", "宠物服", "狗衣"],
     "宠物窝": ["legowisko", "pet bed", "kennel", "猫窝", "狗窝"],
     "喂食器": ["feeder", "karmnik", "fountain", "trink", "自动喂", "喂食"],
     "喂鸟器": ["bird feeder", "domek dla ptaków", " Vogelhaus", "鸟屋"],
@@ -775,7 +783,7 @@ CATEGORY_WORDS = {
     # ---- 洗漱浴室 ----
     "花洒": ["duschkopf", "prysznic", "shower head", "花洒"],
     "浴巾架": ["handtuchhalter", "ręcznik holder", "毛巾架"],
-    "牙刷架": ["zahnborstenhalter", "toothbrush holder", "牙刷卡座"],
+    "牙刷架": ["toothbrush holder", "zahnborstenhalter", "uchwyt na szczoteczki", "szczoteczki do zębów", "牙刷卡座"],
     "肥皂盒": ["seifendose", "soap dish", "肥皂"],
     # ---- 其他 ----
     "雨伞": ["regenschirm", "parasol", "umbrella", "雨伞"],
@@ -808,7 +816,7 @@ CATEGORY_WORDS = {
 
 def cn_of(text):
     """标题 → 中文品名（第一个命中），未识别返回 ''。"""
-    t = str(text or "").lower()
+    t = re.sub(r"[\s\u00a0\u202f]+", " ", str(text or "")).lower().replace("–", "-")
     if not t:
         return ""
     for cat, words in CATEGORY_WORDS.items():
