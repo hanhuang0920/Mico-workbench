@@ -300,27 +300,6 @@ def process_order(path):
             continue
         pairs_out.append(op)
 
-    # 新品里已经填了 SPU 的（货源已确认）也要落进配对，否则下次导入就丢了
-    for nv in d.get("news", []):
-        if not (nv.get("filled_spu") or "").strip():
-            continue
-        nu = norm(nv.get("url"))
-        if not nu or nu in in_order_urls:
-            continue
-        pairs_out.append({
-            "url": nv.get("url") or "",
-            "names": nv.get("names") or [nv.get("name", "")],
-            "inq": nv.get("inq") or "",
-            "spu": nv.get("filled_spu") or "",
-            "u1688": nv.get("u1688") or [],
-            "img": nv.get("img") or "",
-            "filled_spu": nv.get("filled_spu") or "",
-            "mark": None, "note": "",
-            "l1": nv.get("l1") or "", "l2": nv.get("l2") or "",
-            "l3": nv.get("l3") or "",
-        })
-        in_order_urls.add(nu)
-
     pairs = pairs_out
     pairs.sort(key=lambda x: (0 if x.get("spu") else 1, x.get("inq") or ""))
     news = news_out
@@ -927,7 +906,7 @@ def pair_card(i, p):
         '</div></div>' % (
             esc(p.get("inq") or ""), esc(u), esc(cn),
             img, esc(p["names"][0][:84] if p["names"] else ""), cnb,
-            esc((p.get("inq") or "")[-14:]), l1688, i, esc(cur), i,
+            esc((p.get("inq") or "")[-14:]), l1688, i, esc(cur), i, i,
             " done" if p.get("mark") == "same" else "", i, i))
 
 
@@ -957,7 +936,7 @@ def news_card(i, p):
             i, i, checked, img,
             esc(p.get("name", "")), esc(p.get("name", "")[:80]), cnb,
             i, esc(p.get("l1", "")), i, esc(p.get("l2", "")), i, esc(p.get("l3", "")),
-            " filled" if spu_v else "", i, esc(spu_v),
+            " filled" if spu_v else "", i, esc(spu_v), i,
             esc(p.get("url", "")),
             " done" if p.get("mark") == "same" else "", i, i))
 

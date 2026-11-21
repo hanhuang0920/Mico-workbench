@@ -221,7 +221,16 @@ def get_pairs(date_str=None):
 
 
 def update_pair_spu(pair_id, spu, editor):
-    update("pairs", {"id": pair_id}, {"filled_spu": spu, "edited_by": editor})
+    patch = {"filled_spu": spu, "edited_by": editor}
+    try:
+        patch["spus"] = split_spu(spu)
+    except Exception:
+        pass
+    try:
+        update("pairs", {"id": pair_id}, patch)
+    except Exception:
+        # pairs 表可能还没有 spus 列，退回只写 filled_spu
+        update("pairs", {"id": pair_id}, {"filled_spu": spu, "edited_by": editor})
 
 
 # ---------- 业务：新品 ----------
