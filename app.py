@@ -757,24 +757,45 @@ def apply_spu_to_master(user_name="", sync_pairs=True):
     wb.save(INQ_FILE)
     if sb.enabled():
         try:
-            # 配对表填写的 SPU 写回 Supabase products 表：按询盘号/链接精确更新 spu 列，
-            # 不用整行 upsert（避免把 row_no/batch 等字段抹掉）
+            # 配对填的 SPU 写回产品库：有就更新、没有就新增（这样填过的产品永久留在库内，
+            # 后续导入订单按产品库匹配就能认出它是「已询盘」）
+            plist = sb.get_products()
+            by_inq, by_url = {}, {}
+            for pr in plist:
+                if pr.get("inq"):
+                    by_inq[pr["inq"]] = pr
+                if pr.get("url"):
+                    by_url[sb.norm_url(pr["url"])] = pr
+            new_rows = []
             for p in filled:
                 spu_txt = p["filled_spu"].strip()
-                done = False
+                ex = None
                 if p.get("inq"):
+                    ex = by_inq.get(p["inq"])
+                if ex is None and p.get("url"):
+                    ex = by_url.get(sb.norm_url(p["url"]))
+                if ex is not None:
                     try:
-                        sb.update("products", {"inq": p["inq"]},
-                                  {"spu": spu_txt, "spus": sb.split_spu(spu_txt)})
-                        done = True
-                    except Exception:
-                        pass
-                if not done and p.get("url"):
-                    try:
-                        sb.update("products", {"url_key": sb.norm_url(p["url"])},
+                        sb.update("products", {"id": ex["id"]},
                                   {"spu": spu_txt, "spus": sb.split_spu(spu_txt)})
                     except Exception:
                         pass
+                else:
+                    m = re.search(r"INQ-(\d+)", p.get("inq") or "")
+                    new_rows.append({
+                        "row": None,
+                        "names": p.get("names") or [""],
+                        "url": p.get("url") or "",
+                        "inq": p.get("inq") or None,
+                        "batch": m.group(1)[-4:] if m else None,
+                        "spu": spu_txt,
+                        "spus": sb.split_spu(spu_txt),
+                        "u1688": p.get("u1688") or [],
+                        "img": p.get("img") or None,
+                    })
+            if new_rows:
+                sb.upsert_products(new_rows)
+                print("[产品库新增] 配对转入 %d 条" % len(new_rows))
             # 同步 pairs 表里的人工填写值（save-spu 路径已写过，跳过省一次往返）
             if sync_pairs:
                 for p in filled:
@@ -2145,7 +2166,7 @@ class Handler(BaseHTTPRequestHandler):
                         except Exception as e:
                             errs.append(str(e)[:120])
                             continue
-                    # 有 SPU = 货源已确认 → 移入待采集配对
+                    # 有 SPU = 货源已确认 → 移入待采集配对 + 写进产品库
                     if spu:
                         if sb.enabled():
                             try:
@@ -2156,6 +2177,21 @@ class Handler(BaseHTTPRequestHandler):
                                                   for n in (item.get("names") or [item.get("name", "")])])
                             except Exception:
                                 pass
+                            # 写进产品库：以后导入订单按产品库匹配就能认出它已确定货源
+                            try:
+                                m0 = re.search(r"INQ-(\d+)", item.get("inq") or "")
+                                sb.upsert_products([{
+                                    "row": None,
+                                    "names": item.get("names") or [item.get("name", "")],
+                                    "url": item.get("url") or "",
+                                    "inq": item.get("inq") or None,
+                                    "batch": m0.group(1)[-4:] if m0 else None,
+                                    "spu": spu, "spus": sb.split_spu(spu),
+                                    "u1688": item.get("u1688") or [],
+                                    "img": item.get("img") or None,
+                                }])
+                            except Exception as e:
+                                errs.append("写产品库失败:%s" % str(e)[:80])
                         u = norm(item.get("url"))
                         dup = any(norm(p.get("url")) == u for p in pairs if p.get("url"))
                         if not dup and u:
