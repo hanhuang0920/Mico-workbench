@@ -796,7 +796,7 @@ def cn_badge(cn):
             'onclick="byCn(\'%s\')">%s</b>' % (esc(cn), esc(cn), esc(cn)))
 
 
-def product_card(p):
+def product_card(p, i=0):
     name = p["names"][0] if p["names"] else ""
     cn = similar.cn_for(p)
     cnb = cn_badge(cn)
@@ -817,7 +817,8 @@ def product_card(p):
         '<div class="pn" title="%s">%s%s %s</div>'
         '<div class="ps">%s</div>'
         '<div class="pf"><span class="iq">%s</span></div>'
-        '<div class="pl">%s %s</div></div></div>' % (
+        '<div class="pl">%s %s'
+        '<button class="simbtn" onclick="sim(%d,\'lib\')">相似款</button></div></div></div>' % (
             esc(name.lower() + " " + cn), esc(p["spu"].lower()), esc(p["inq"].lower()),
             "1" if p.get("multi_spu") else "0",
             "0" if p["spu"] else "1",
@@ -825,7 +826,7 @@ def product_card(p):
             esc(cn),
             img, esc(" ／ ".join(p["names"])), esc(name[:90]),
             ('<i>+%d</i>' % extra) if extra > 0 else "", cnb,
-            spu_html, esc(p["inq"][-14:] if p["inq"] else "—"), link, l1688))
+            spu_html, esc(p["inq"][-14:] if p["inq"] else "—"), link, l1688, i))
 
 
 def pair_card(i, p):
@@ -957,7 +958,7 @@ def page_index():
     n_multi = sum(1 for p in prods if p.get("multi_spu"))
     n_noiq = sum(1 for p in prods if not p["inq"])
 
-    cards = "".join(product_card(p) for p in prods)
+    cards = "".join(product_card(p, i) for i, p in enumerate(prods))
     pcards = "".join(pair_card(i, p) for i, p in enumerate(pairs))
     no_pairs = '<div class="empty">还没有配对数据<br><span>请在 ① 上传今日订单文件</span></div>' if not pairs else ""
 
@@ -1924,7 +1925,11 @@ class Handler(BaseHTTPRequestHandler):
                 kind = payload.get("kind", "pair")
                 i2 = payload.get("idx")
                 d = load_data()
-                lst = d.get("pairs" if kind == "pair" else "news", [])
+                if kind == "lib":
+                    # 产品库内部互相比对：目标取自产品库，候选也是产品库
+                    lst = d.get("products", [])
+                else:
+                    lst = d.get("pairs" if kind == "pair" else "news", [])
                 if not (isinstance(i2, int) and 0 <= i2 < len(lst)):
                     self._send(200, json.dumps({"ok": False, "msg": "索引无效"}, ensure_ascii=False))
                     return
