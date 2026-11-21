@@ -953,7 +953,8 @@ def find_similar(target_names, target_img_url, pool, topn=3, min_score=0.50,
             xs = set(x.get("spus") or ([x["spu"]] if x.get("spu") else []))
             if exclude_spu & xs:
                 continue
-        if x.get("names") and (set(x["names"]) & tnames_set):
+        # 同一条记录（主标题相同）才算自己；多语言 names 数组有交集不代表是同一行
+        if x.get("names") and tname and x["names"][0] == tname:
             continue
         ns = max((nsim(tname, n) for n in x.get("names", [])), default=0.0)
         xsig, xpath = sig_for_url(x.get("img"))
@@ -1000,14 +1001,20 @@ def find_similar(target_names, target_img_url, pool, topn=3, min_score=0.50,
             level = "same"
         elif has_img and df <= 600 and ov and ns >= 0.30:
             level = "same"                          # 图近 + 同品类 + 标题沾边
+        elif has_img and xcn and tcn and xcn == tcn and df <= 600:
+            level = "same"                          # 同一中文品名 + 图片高度相近（跨语种同款）
         elif has_img and df <= 700 and hc >= 0.55 and not white_pair:
             level = "likely"
         elif has_img and df <= 750 and ov and ns >= 0.25:
             level = "likely"
+        elif has_img and xcn and tcn and xcn == tcn and df <= 750:
+            level = "likely"                        # 同一中文品名 + 图片相近
         elif has_img and df <= 800 and hc >= 0.50 and not white_pair:
             level = "possible"
         elif has_img and df <= 850 and ov and ns >= 0.20:
             level = "possible"
+        elif has_img and xcn and tcn and xcn == tcn and df <= 900:
+            level = "possible"                      # 同一中文品名兜底：交给人工确认
         elif ns >= 0.78:                            # 标题几乎相同
             level = "likely"
         elif ns >= 0.65 and ov:
