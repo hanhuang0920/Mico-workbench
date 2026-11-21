@@ -30,7 +30,7 @@ HOST = os.environ.get("HOST", "127.0.0.1")
 # 设 APP_PASSWORD 即启用登录；留空则免登录（仅本机使用）
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 USERS = [u.strip() for u in os.environ.get("APP_USERS", "同事A,同事B").split(",") if u.strip()]
-PER_PAGE = 48
+PER_PAGE = 96
 
 # ---- 文件路径 ----
 def _find_inq_file():
@@ -202,6 +202,13 @@ def process_order(path):
     inq_by_url = {norm(p["url"]): p for p in d["products"]}
     prods = read_order(path)
     pairs, not_inq, with_sku = [], 0, 0
+    # 继承上一次上传的人工填写（重复上传不洗掉已填 SPU / 标记）
+    old_pairs = {}
+    for op in d.get("pairs", []):
+        if op.get("inq"):
+            old_pairs[op["inq"]] = op
+        if op.get("url"):
+            old_pairs[norm(op["url"])] = op
     for k, p in prods.items():
         hit = inq_by_url.get(k)
         if not hit:
@@ -210,12 +217,14 @@ def process_order(path):
         if p["skus"]:
             with_sku += 1
             continue
+        prev = old_pairs.get(hit["inq"]) or old_pairs.get(k) or {}
         pairs.append({
             "url": p["url"],
             "names": hit["names"] + [n for n in p["names"] if n not in hit["names"]],
             "inq": hit["inq"], "spu": hit["spu"],
             "u1688": hit["u1688"], "img": hit["img"] or p["img"],
-            "filled_spu": "", "note": "",
+            "filled_spu": prev.get("filled_spu") or "",
+            "mark": prev.get("mark"), "note": prev.get("note") or "",
         })
     pairs.sort(key=lambda x: (0 if x["spu"] else 1, x["inq"]))
     d["pairs"] = pairs
@@ -227,16 +236,25 @@ def process_order(path):
         except Exception as e:
             print("[Supabase 配对写入失败] %s" % e)
 
-    # 未询盘 → 询盘需求表候选
+    # 未询盘 → 询盘需求表候选（同样继承已填分类 / SPU / 勾选状态）
+    old_news = {}
+    for op in d.get("news", []):
+        if op.get("url"):
+            old_news[norm(op["url"])] = op
     news = []
     for k, p in prods.items():
         if k in inq_by_url:
             continue
         nm = p["names"][0] if p["names"] else ""
+        prev = old_news.get(k) or {}
         news.append({
             "url": p["url"], "name": nm, "names": p["names"],
             "img": p["img"], "skus": p["skus"],
-            "l1": "", "l2": "", "l3": "", "checked": True,
+            "l1": prev.get("l1", "") or "", "l2": prev.get("l2", "") or "",
+            "l3": prev.get("l3", "") or "",
+            "filled_spu": prev.get("filled_spu", "") or "",
+            "mark": prev.get("mark"),
+            "checked": prev.get("checked", True),
         })
     d["news"] = news
     if sb.enabled():
@@ -753,6 +771,7 @@ def news_card(i, p):
     checked = "checked" if p.get("checked", True) else ""
     cn = similar.cn_of_names(p.get("names") or [p.get("name", "")])
     cnb = cn_badge(cn)
+    spu_v = p.get("filled_spu") or ""
     return (
         '<div class="newscard" data-idx="%d">'
         '<label class="chk"><input type="checkbox" data-idx="%d" %s></label>'
@@ -763,14 +782,18 @@ def news_card(i, p):
         '<input class="ci" data-idx="%d" data-k="l2" placeholder="二级" value="%s">'
         '<input class="ci" data-idx="%d" data-k="l3" placeholder="三级" value="%s">'
         '</div>'
+        '<div class="inputrow"><label>SPU</label>'
+        '<input class="spn%s" data-idx="%d" value="%s" placeholder="选填：已有货源码就填这里"></div>'
         '<div class="pl"><a href="%s" target="_blank" rel="noopener">站点</a>'
-        '<button class="simbtn%s" onclick="sim(%d,\'news\')">相似款</button></div>'
+        '<button class="simbtn%s" onclick="sim(%d,\'news\')">相似款</button>'
+        '<button class="simbtn savebtn" onclick="saveNewsSpu(%d)">保存SPU</button></div>'
         '</div></div>' % (
             i, i, checked, img,
             esc(p.get("name", "")), esc(p.get("name", "")[:80]), cnb,
             i, esc(p.get("l1", "")), i, esc(p.get("l2", "")), i, esc(p.get("l3", "")),
+            " filled" if spu_v else "", i, esc(spu_v),
             esc(p.get("url", "")),
-            " done" if p.get("mark") == "same" else "", i))
+            " done" if p.get("mark") == "same" else "", i, i))
 
 
 LOGIN_TPL = """<!DOCTYPE html>
@@ -913,10 +936,12 @@ main{max-width:1560px;margin:0 auto;padding:16px 22px 60px}
 .pl a:hover{text-decoration:underline}
 .inputrow{display:flex;align-items:center;gap:7px;margin-top:4px}
 .inputrow label{font-size:11px;color:#64748b;font-weight:600}
-.spin{flex:1;padding:6px 9px;border:1px solid #e2e8f0;border-radius:6px;
+.spin,.spn{flex:1;padding:6px 9px;border:1px solid #e2e8f0;border-radius:6px;
  font-family:ui-monospace,Consolas,monospace;font-size:11.5px;outline:none;min-width:0}
 .spin:focus{border-color:#4f46e5}
+.spn:focus{border-color:#4f46e5}
 .spin.filled{border-color:#10b981;background:#f0fdf4}
+.spn.filled{border-color:#10b981;background:#f0fdf4}
 .drop{border:2px dashed #cbd5e1;border-radius:12px;padding:34px 22px;text-align:center;
  background:#fff;cursor:pointer}
 .drop:hover,.drop.over{border-color:#4f46e5;background:#f5f3ff}
@@ -1052,7 +1077,7 @@ main{max-width:1560px;margin:0 auto;padding:16px 22px 60px}
     <span class="count" id="c0"></span>
   </div>
   <div class="grid" id="g0">{{CARDS}}</div>
-  <div class="more" id="more0"><button onclick="loadMore()">加载更多</button><span id="tip0"></span></div>
+  <div class="more" id="more0"><button onclick="loadMore()">加载更多</button><button onclick="showAll0()">全部显示</button><span id="tip0"></span></div>
 </div>
 
 <div class="panel" id="p1">
@@ -1187,6 +1212,15 @@ function loadMore(){
     m.style.display='none';
   }
 }
+function showAll0(){
+  var g=document.getElementById('g0');
+  var hits=ALL.filter(match);
+  var frag=document.createDocumentFragment();
+  hits.slice(g.children.length).forEach(function(c){frag.appendChild(c)});
+  g.appendChild(frag);
+  document.getElementById('more0').style.display='none';
+  document.getElementById('c0').textContent='已显示全部 '+hits.length+' 款';
+}
 function f1(){
   var q=document.getElementById('q1').value.toLowerCase();
   var n=0;
@@ -1304,6 +1338,21 @@ function saveSpu(){
   .then(function(d){
     if(!d.ok){toast('失败：'+(d.msg||''));return}
     toast('已更新 '+d.updated+' 条，备份：'+(d.backup||'无'));
+  }).catch(function(e){toast('出错：'+e)});
+}
+function saveNewsSpu(idx){
+  var el=document.querySelector('.spn[data-idx="'+idx+'"]');
+  if(!el){toast('未找到输入框');return}
+  var v=el.value.trim();
+  if(!v){toast('这条还没填 SPU');return}
+  fetch('/api/save-news-spu',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({items:[{idx:idx,spu:v}]})}).then(function(r){
+      if(!r.ok)throw Error('HTTP '+r.status);
+      return r.json()})
+  .then(function(d){
+    if(!d.ok){toast('写入失败：'+(d.errors&&d.errors[0]||'未知错误'));return}
+    el.classList.add('filled');
+    toast('SPU 已保存到云端');
   }).catch(function(e){toast('出错：'+e)});
 }
 function exportXlsx(){
@@ -1736,6 +1785,38 @@ class Handler(BaseHTTPRequestHandler):
                     {"ok": True, "target": {"names": names, "img": t.get("img", ""),
                                             "cn": similar.cn_of_names(names)},
                      "candidates": out}, ensure_ascii=False))
+                return
+
+            # 未询盘新品：手动保存 SPU
+            if self.path == "/api/save-news-spu":
+                payload = json.loads(raw.decode("utf-8"))
+                arr = payload.get("items", [])
+                d = load_data()
+                news = d.get("news", [])
+                ok_n = 0
+                errs = []
+                for x in arr:
+                    i2 = x.get("idx")
+                    spu = (x.get("spu") or "").strip()
+                    if not isinstance(i2, int) or not (0 <= i2 < len(news)):
+                        continue
+                    item = news[i2]
+                    item["filled_spu"] = spu
+                    item["by"] = user
+                    ok_n += 1
+                    if sb.enabled() and item.get("id"):
+                        try:
+                            sb.update("news", {"id": item["id"]},
+                                      {"filled_spu": spu, "edited_by": user})
+                            sb.log_edit(user, "news", item.get("id"), "", spu,
+                                        (item.get("names") or [item.get("name", "")])[0][:80])
+                        except Exception as e:
+                            errs.append(str(e)[:120])
+                save_data(d)
+                invalidate_cache()
+                self._send(200, json.dumps(
+                    {"ok": not errs, "saved": ok_n, "errors": errs[:2]},
+                    ensure_ascii=False))
                 return
 
             if self.path == "/api/mark-same":

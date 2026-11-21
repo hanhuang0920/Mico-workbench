@@ -228,10 +228,21 @@ def save_news(date_str, items):
             "l1": p.get("l1") or None,
             "l2": p.get("l2") or None,
             "l3": p.get("l3") or None,
+            "filled_spu": p.get("filled_spu") or None,
             "checked": p.get("checked", True),
         })
-    for i in range(0, len(rows), 200):
-        insert("news", rows[i:i + 200])
+    try:
+        for i in range(0, len(rows), 200):
+            insert("news", rows[i:i + 200])
+    except Exception as e:
+        # 老库还没加 filled_spu 列时自动去掉该字段重试
+        if "filled_spu" in str(e):
+            for r in rows:
+                r.pop("filled_spu", None)
+            for i in range(0, len(rows), 200):
+                insert("news", rows[i:i + 200])
+        else:
+            raise
     return len(rows)
 
 
@@ -252,6 +263,7 @@ def get_news(date_str=None):
             "l1": r.get("l1") or "",
             "l2": r.get("l2") or "",
             "l3": r.get("l3") or "",
+            "filled_spu": r.get("filled_spu") or "",
             "checked": r.get("checked", True),
         })
     return out

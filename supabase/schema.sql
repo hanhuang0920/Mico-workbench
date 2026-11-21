@@ -159,3 +159,6 @@ drop policy if exists "img_sigs_upd"   on img_sigs;
 create policy "img_sigs_read"  on img_sigs for select using (true);
 create policy "img_sigs_write" on img_sigs for insert with check (true);
 create policy "img_sigs_upd"   on img_sigs for update using (true) with check (true);
+
+-- 未询盘新品手动 SPU 列（2026-11-21 新增）
+alter table news add column if not exists filled_spu text;
