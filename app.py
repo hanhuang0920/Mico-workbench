@@ -603,21 +603,24 @@ def apply_spu_to_master(user_name="", sync_pairs=True):
     wb.save(INQ_FILE)
     if sb.enabled():
         try:
-            # 配对表填写的 SPU 也写回 Supabase 的 products 表
-            prods_now = []
+            # 配对表填写的 SPU 写回 Supabase products 表：按询盘号/链接精确更新 spu 列，
+            # 不用整行 upsert（避免把 row_no/batch 等字段抹掉）
             for p in filled:
-                prods_now.append({
-                    "row": None,
-                    "names": p.get("names") or [],
-                    "url": p.get("url") or "",
-                    "inq": p.get("inq") or "",
-                    "spu": p["filled_spu"].strip(),
-                    "spus": sb.split_spu(p["filled_spu"]),
-                    "u1688": p.get("u1688") or [],
-                    "img": p.get("img") or "",
-                })
-            if prods_now:
-                sb.upsert_products(prods_now)
+                spu_txt = p["filled_spu"].strip()
+                done = False
+                if p.get("inq"):
+                    try:
+                        sb.update("products", {"inq": p["inq"]},
+                                  {"spu": spu_txt, "spus": sb.split_spu(spu_txt)})
+                        done = True
+                    except Exception:
+                        pass
+                if not done and p.get("url"):
+                    try:
+                        sb.update("products", {"url_key": sb.norm_url(p["url"])},
+                                  {"spu": spu_txt, "spus": sb.split_spu(spu_txt)})
+                    except Exception:
+                        pass
             # 同步 pairs 表里的人工填写值（save-spu 路径已写过，跳过省一次往返）
             if sync_pairs:
                 for p in filled:
@@ -703,11 +706,19 @@ def pair_card(i, p):
             'onfocus="this.select()" title="点击即复制">'
             '<a href="%s" target="_blank" rel="noopener">打开</a></div>'
             % (esc(u), esc(u)) for u in links)
-        l1688 = '<div class="links">%s</div>' % rows
     else:
-        l1688 = '<div class="links"><span class="nolink">无 1688 链接</span></div>'
+        rows = '<div class="l1688"><span class="nolink">无 1688 链接</span></div>'
+    u = p.get("url") or ""
+    if u.startswith("http"):
+        short = re.sub(r"^https?://(www\.)?", "", u)
+        if len(short) > 34:
+            short = short[:34] + "…"
+        rows += ('<div class="l1688 lsite"><a href="%s" target="_blank" rel="noopener" '
+                 'title="%s" class="siteurl">&#127761; %s</a></div>'
+                 % (esc(u), esc(u), esc(short)))
+    l1688 = '<div class="links">%s</div>' % rows
     return (
-        '<div class="paircard"><div class="pi">%s</div><div class="pb">'
+        '<div class="paircard" data-inq="%s" data-url="%s"><div class="pi">%s</div><div class="pb">'
         '<div class="pn">%s</div>'
         '<div class="ps"><span class="iq">%s</span></div>'
         '%s'
@@ -718,6 +729,7 @@ def pair_card(i, p):
         '<button class="simbtn savebtn" onclick="saveOne(%d)">保存</button>'
         '</div>'
         '</div></div>' % (
+            esc(p.get("inq") or ""), esc(u),
             img, esc(p["names"][0][:84] if p["names"] else ""),
             esc((p.get("inq") or "")[-14:]), l1688, i, esc(cur),
             " done" if p.get("mark") == "same" else "", i, i))
@@ -941,6 +953,10 @@ main{max-width:1560px;margin:0 auto;padding:16px 22px 60px}
 .l1688 a{font-size:10.5px;color:#2563eb;text-decoration:none;white-space:nowrap}
 .l1688 a:hover{text-decoration:underline}
 .nolink{font-size:10.5px;color:#cbd5e1}
+.siteurl{font-size:10.5px;color:#0f766e;text-decoration:none;background:#f0fdfa;
+  border:1px solid #99f6e4;border-radius:5px;padding:3px 8px;max-width:100%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block}
+.siteurl:hover{background:#ccfbf1;text-decoration:none}
 .simbtn.done{background:#d1fae5;border-color:#6ee7b7;color:#047857}
 .modal{position:fixed;inset:0;background:rgba(15,23,42,.62);z-index:200;
  display:none;align-items:center;justify-content:center;padding:20px}
@@ -1226,6 +1242,7 @@ function doSave(arr,done,retry){
     if(d.failed)m+='，失败 '+d.failed+' 条';
     if(d.xlsx_msg)m+='（'+d.xlsx_msg+'）';
     toast(m);
+    arr.forEach(function(x){ if(x.spu) reflectLib(pairInq(x.idx),x.spu); });
     if(done)setTimeout(function(){location.reload()},1200);
   }).catch(function(e){
     SAVING=false;
@@ -1387,7 +1404,8 @@ function sim(idx,kind){
         h+='</div>';
         h+='<div class="cmpact">';
         h+='<span class="level '+c.level+'">'+esc2(c.level_txt)+'</span>';
-        h+='<button class="byes" onclick="markSame('+idx+',\''+kind+'\','+c.row+')">是同一款</button>';
+        h+='<button class="byes" data-spu="'+esc2(c.spu||(c.spus||[]).join(','))+'" '
+           +'onclick="markSame(this,'+idx+',\''+kind+'\','+c.row+')">是同一款</button>';
         h+='<button class="bno" onclick="markDiff('+idx+',\''+kind+'\')">不是同款</button>';
         h+='</div></div>';
       });
@@ -1395,12 +1413,35 @@ function sim(idx,kind){
     b.innerHTML=h;
   }).catch(function(e){b.innerHTML='<div class="simempty">出错：'+esc2(e)+'</div>'});
 }
-function markSame(idx,kind,row){
+function reflectLib(inq,spu){
+  var pc=document.querySelector('#g0 .pc[data-i="'+String(inq||'').toLowerCase()+'"]');
+  if(!pc)return;
+  var ps=pc.querySelector('.ps'); if(!ps)return;
+  if(spu){
+    ps.innerHTML='<b class="spu">'+esc2(spu)+'</b>';
+    pc.dataset.s=String(spu).toLowerCase(); pc.dataset.p='0';
+  }
+}
+function pairInq(idx){
+  var el=document.querySelector('.spin[data-idx="'+idx+'"]');
+  var card=el&&el.closest('.paircard');
+  return card?card.getAttribute('data-inq'):'';
+}
+function markSame(btn,idx,kind,row){
+  var spu=(btn.getAttribute('data-spu')||'').trim();
   fetch('/api/mark-same',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({idx:idx,kind:kind,same:true,cand_row:row})})
   .then(function(r){return r.json()}).then(function(d){
-    toast(d.ok?'已标记为同款，可据此剔除':'保存失败');
     closeModal();
+    if(!d.ok){toast('标记保存失败');return}
+    if(kind==='pair'&&spu){
+      var el=document.querySelector('.spin[data-idx="'+idx+'"]');
+      if(el){el.value=spu;el.classList.add('filled');}
+      doSave([{idx:idx,spu:spu}],false);
+      toast('已标同款，SPU '+spu+' 已带出并保存');
+    }else{
+      toast('已标记为同款，可据此剔除');
+    }
   }).catch(function(e){toast('出错：'+e)});
 }
 function markDiff(idx,kind){
