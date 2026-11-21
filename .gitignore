@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.tmp
+_upload_*.xlsx
+_tmp_*.xlsx
+_imgcache/
+备份/
+_data.json
+_sigs.json
+.env
