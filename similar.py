@@ -410,6 +410,61 @@ def img_sig(path):
     return sig
 
 
+# ===== URL 级签名缓存（存 Supabase img_sigs 表，云端重启不用重新下载图片）=====
+_URL_SIGS = None
+
+
+def _load_url_sigs():
+    global _URL_SIGS
+    if _URL_SIGS is None:
+        _URL_SIGS = {}
+        try:
+            import supabase_store as _sb
+            if _sb.enabled():
+                _URL_SIGS = _sb.get_img_sigs()
+        except Exception as e:
+            print("[img_sigs 读取失败，退回在线下载] %s" % e)
+    return _URL_SIGS
+
+
+def sig_for_url(url):
+    """优先用 Supabase 签名缓存（不下载图片）；缺失才下载计算并写回。
+    返回 (sig, path_or_None)：path 为 None 表示无需本地文件。"""
+    u = norm(url)
+    if not u or not str(url).startswith("http"):
+        return None, None
+    sigs = _load_url_sigs()
+    if u in sigs and len(sigs[u]) >= 9:
+        return tuple(sigs[u]), None
+    p = ensure_img(url)
+    sig = img_sig(p) if p else None
+    if sig is not None:
+        sigs[u] = sig
+        try:
+            import supabase_store as _sb
+            if _sb.enabled():
+                _sb.put_img_sig(u, [x if not isinstance(x, tuple) else list(x) for x in sig])
+        except Exception:
+            pass
+    return sig, p
+
+
+def _hue_of(sig):
+    if sig and len(sig) >= 9 and sig[8]:
+        try:
+            import numpy as np
+        except ImportError:
+            return None
+        return np.array(sig[8], dtype=np.float32)
+    return None
+
+
+def _white_of(sig):
+    if sig and len(sig) >= 8:
+        return sig[7] / 1000.0
+    return 0.0
+
+
 def hdist(a, b):
     """亮度哈希距离（aHash + dHash），对颜色敏感。"""
     if not a or not b:
@@ -540,10 +595,9 @@ def find_similar(target_names, target_img_url, pool, topn=3, min_score=0.50,
     返回按匹配度排序的候选列表。
     """
     tname = target_names[0] if target_names else ""
-    tpath = ensure_img(target_img_url)
-    tsig = img_sig(tpath)
-    thue = hue_hist(tpath) if tpath else None
-    twhite = whiteness(tpath) if tpath else 0.0
+    tsig, tpath = sig_for_url(target_img_url)
+    thue = _hue_of(tsig)
+    twhite = _white_of(tsig) if tsig else 0.0
     turl = norm(target_img_url)
     tnames_set = set(target_names)
 
@@ -564,14 +618,17 @@ def find_similar(target_names, target_img_url, pool, topn=3, min_score=0.50,
         if x.get("names") and (set(x["names"]) & tnames_set):
             continue
         ns = max((nsim(tname, n) for n in x.get("names", [])), default=0.0)
-        xpath = ensure_img(x.get("img"))
-        xsig = img_sig(xpath)
+        xsig, xpath = sig_for_url(x.get("img"))
+        if xsig is None and xpath is not None:
+            xsig = img_sig(xpath)
+        if tsig is None and tpath is not None:
+            tsig = img_sig(tpath)
         d = hdist(tsig, xsig)
         ds = sdist(tsig, xsig)
         dp = shapdist(tsig, xsig)
         df = fine_dist(tsig, xsig)
-        hc = cosv(thue, hue_hist(xpath)) if xpath else 0.0
-        xwhite = whiteness(xpath) if xpath else 0.0
+        hc = cosv(thue, _hue_of(xsig)) if xsig else 0.0
+        xwhite = _white_of(xsig) if xsig else 0.0
         # 双方都是白底图时，色相不可靠 → 置中性值
         if twhite > 0.45 and xwhite > 0.45:
             hc = 0.0

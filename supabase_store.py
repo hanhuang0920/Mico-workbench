@@ -294,3 +294,43 @@ def get_stats():
         except Exception:
             out[t] = 0
     return out
+
+
+# ---------- 业务：图片签名缓存（提速相似款比对） ----------
+def get_img_sigs():
+    """全量读 img_sigs：{url_key: sig_tuple}。表不存在时返回空（优雅降级）。"""
+    try:
+        rows = select("img_sigs", {"select": "url_key,sig", "limit": "5000"})
+    except Exception:
+        return {}
+    out = {}
+    for r in rows or []:
+        s = r.get("sig")
+        if s and r.get("url_key"):
+            out[r["url_key"]] = tuple(s)
+    return out
+
+
+_SIG_WRITE_OK = True
+
+
+def put_img_sig(url_key, sig_list):
+    global _SIG_WRITE_OK
+    if not _SIG_WRITE_OK:
+        return
+    try:
+        insert("img_sigs", [{"url_key": url_key, "sig": sig_list}], upsert_on="url_key")
+    except Exception as e:
+        # 表不存在/权限问题时熔断，避免每张图都白白请求一次
+        _SIG_WRITE_OK = False
+        print("put_img_sig 失败（已停用签名回写）:", e)
+
+
+def put_img_sigs_bulk(pairs_):
+    """批量写入 [(url_key, sig_list)]，分批 200。返回写入数。"""
+    rows = [{"url_key": k, "sig": v} for k, v in pairs_ if k and v]
+    n = 0
+    for i in range(0, len(rows), 200):
+        insert("img_sigs", rows[i:i + 200], upsert_on="url_key")
+        n += len(rows[i:i + 200])
+    return n

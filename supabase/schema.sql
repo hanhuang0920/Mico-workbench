@@ -141,3 +141,21 @@ end $$;
 select 'products' as tbl, count(*) from products
 union all select 'pairs', count(*) from pairs
 union all select 'news', count(*) from news;
+
+
+-- ============================================================
+-- 图片签名缓存表（提速相似款比对：云端存哈希，不用再下载365张图）
+-- 在 Supabase SQL Editor 里单独执行下面这段也可以
+-- ============================================================
+create table if not exists img_sigs (
+  url_key    text primary key,
+  sig        jsonb not null,
+  updated_at timestamptz default now()
+);
+alter table img_sigs enable row level security;
+drop policy if exists "img_sigs_read"  on img_sigs;
+drop policy if exists "img_sigs_write" on img_sigs;
+drop policy if exists "img_sigs_upd"   on img_sigs;
+create policy "img_sigs_read"  on img_sigs for select using (true);
+create policy "img_sigs_write" on img_sigs for insert with check (true);
+create policy "img_sigs_upd"   on img_sigs for update using (true) with check (true);
