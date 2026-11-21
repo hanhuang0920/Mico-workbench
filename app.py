@@ -493,6 +493,51 @@ def export_pairs():
     return {"ok": True, "file": os.path.basename(out), "count": len(pairs), "imgs": len(got)}
 
 
+def save_spu_supabase(arr, editor):
+    """把填写的 SPU 写入 Supabase pairs 表（按 id / 询盘号 / 链接三重匹配）。
+    返回 (写入数, 失败数, 错误列表)。多人协作必须确认真的写进去了，不能静默失败。"""
+    if not sb.enabled():
+        return 0, 0, ["未配置 SUPABASE_URL / SUPABASE_ANON_KEY"]
+    rows = sb.get_pairs()
+    by_id, by_inq, by_url = {}, {}, {}
+    for r in rows:
+        if r.get("id") is not None:
+            by_id[r["id"]] = r
+        if r.get("inq"):
+            by_inq[r["inq"]] = r
+        if r.get("url"):
+            by_url[norm(r["url"])] = r
+    lst = load_data().get("pairs", [])
+    ok_n = fail_n = 0
+    errs = []
+    for x in arr:
+        i2 = x.get("idx")
+        spu = (x.get("spu") or "").strip()
+        if not spu or not isinstance(i2, int) or not (0 <= i2 < len(lst)):
+            continue
+        p = lst[i2]
+        row = None
+        if p.get("id") is not None:
+            row = by_id.get(p["id"])
+        if row is None and p.get("inq"):
+            row = by_inq.get(p["inq"])
+        if row is None and p.get("url"):
+            row = by_url.get(norm(p["url"]))
+        if row is None:
+            fail_n += 1
+            errs.append("找不到云端记录：%s" % ((p.get("names") or [""])[0][:40]))
+            continue
+        try:
+            sb.update_pair_spu(row["id"], spu, editor)
+            p["id"] = row["id"]
+            ok_n += 1
+        except Exception as e:
+            fail_n += 1
+            errs.append("写入失败(%s)：%s" % (row["id"], str(e)[:80]))
+    invalidate_cache()
+    return ok_n, fail_n, errs
+
+
 def record_edit(pairs, editor, arr):
     """记录谁在什么时候改了什么。"""
     if sb.enabled():
@@ -641,19 +686,32 @@ def product_card(p):
 def pair_card(i, p):
     img = ('<img src="%s" loading="lazy">' % esc(p["img"])) if p["img"] else '<span class="nopic">无图</span>'
     cur = p.get("filled_spu") or p.get("spu") or ""
+    links = p.get("u1688") or []
+    if links:
+        rows = "".join(
+            '<div class="l1688"><input class="i1688" readonly value="%s" '
+            'onclick="this.select();document.execCommand(\'copy\')" '
+            'onfocus="this.select()" title="点击即复制">'
+            '<a href="%s" target="_blank" rel="noopener">打开</a></div>'
+            % (esc(u), esc(u)) for u in links)
+        l1688 = '<div class="links">%s</div>' % rows
+    else:
+        l1688 = '<div class="links"><span class="nolink">无 1688 链接</span></div>'
     return (
         '<div class="paircard"><div class="pi">%s</div><div class="pb">'
         '<div class="pn">%s</div>'
         '<div class="ps"><span class="iq">%s</span></div>'
+        '%s'
         '<div class="inputrow"><label>SPU</label>'
         '<input class="spin" data-idx="%d" value="%s" placeholder="填写 SPU"></div>'
         '<div style="display:flex;gap:6px;margin-top:4px">'
         '<button class="simbtn%s" onclick="sim(%d,\'pair\')">相似款比对</button>'
+        '<button class="simbtn savebtn" onclick="saveOne(%d)">保存</button>'
         '</div>'
         '</div></div>' % (
             img, esc(p["names"][0][:84] if p["names"] else ""),
-            esc((p.get("inq") or "")[-14:]), i, esc(cur),
-            " done" if p.get("mark") == "same" else "", i))
+            esc((p.get("inq") or "")[-14:]), l1688, i, esc(cur),
+            " done" if p.get("mark") == "same" else "", i, i))
 
 
 def news_card(i, p):
@@ -863,6 +921,17 @@ main{max-width:1560px;margin:0 auto;padding:16px 22px 60px}
 .simbtn{padding:4px 10px;border-radius:6px;border:1px solid #c7d2fe;background:#eef2ff;
  color:#4338ca;font-size:10.5px;font-weight:600;cursor:pointer;font-family:inherit}
 .simbtn:hover{background:#e0e7ff}
+.savebtn{border-color:#fdba74;background:#fff7ed;color:#c2410c}
+.savebtn:hover{background:#ffedd5}
+.links{margin:4px 0 6px}
+.l1688{display:flex;gap:4px;margin-top:3px;align-items:center}
+.i1688{flex:1;min-width:0;font-size:10.5px;padding:3px 5px;border:1px solid #e2e8f0;
+  border-radius:5px;background:#f8fafc;color:#475569;font-family:ui-monospace,monospace;
+  cursor:pointer;text-overflow:ellipsis}
+.i1688:focus{background:#eff6ff;border-color:#93c5fd;outline:none}
+.l1688 a{font-size:10.5px;color:#2563eb;text-decoration:none;white-space:nowrap}
+.l1688 a:hover{text-decoration:underline}
+.nolink{font-size:10.5px;color:#cbd5e1}
 .simbtn.done{background:#d1fae5;border-color:#6ee7b7;color:#047857}
 .modal{position:fixed;inset:0;background:rgba(15,23,42,.62);z-index:200;
  display:none;align-items:center;justify-content:center;padding:20px}
@@ -960,7 +1029,7 @@ main{max-width:1560px;margin:0 auto;padding:16px 22px 60px}
   <div class="summary" id="sum">
     <div class="srow" id="sumrow"></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <button class="btn" onclick="saveSpu()">保存 SPU 并写回四列表</button>
+      <button class="btn" onclick="saveSpuAll()">保存全部 SPU（云端）</button>
       <button class="btn ghost" onclick="exportXlsx()">导出配对表 xlsx</button>
     </div>
   </div>
@@ -1127,6 +1196,37 @@ function collect(){
     arr.push({idx:parseInt(i.dataset.idx),spu:i.value.trim()});
   });
   return arr.filter(function(x){return x.spu});
+}
+function doSave(arr,done){
+  if(!arr.length){toast('还没有填写任何 SPU');return}
+  fetch('/api/save-spu',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({spus:arr})}).then(function(r){return r.json()})
+  .then(function(d){
+    if(!d.ok){
+      toast('云端未写入：'+(d.msg||(d.errors&&d.errors[0])||'未知错误'));
+      console.log('[save-spu]',d); return;
+    }
+    var m='已同步到云端 '+d.cloud+' 条';
+    if(d.failed)m+='，失败 '+d.failed+' 条';
+    if(d.xlsx_msg)m+='（'+d.xlsx_msg+'）';
+    toast(m);
+    if(done)setTimeout(function(){location.reload()},1200);
+  }).catch(function(e){toast('出错：'+e)});
+}
+function saveOne(idx){
+  var el=document.querySelector('.spin[data-idx="'+idx+'"]');
+  if(!el){toast('找不到输入框');return}
+  var v=el.value.trim();
+  if(!v){toast('这条还没填 SPU');return}
+  el.classList.add('filled');
+  doSave([{idx:idx,spu:v}],false);
+}
+function saveSpuAll(){
+  saveDemand();
+  var arr=collect();
+  if(!arr.length){toast('还没有填写任何 SPU');return}
+  if(!confirm('把 '+arr.length+' 条 SPU 保存到云端？（同事立即可见）'))return;
+  doSave(arr,true);
 }
 function saveSpu(){
   saveDemand();
@@ -1455,7 +1555,21 @@ class Handler(BaseHTTPRequestHandler):
                 d["pairs"] = pairs
                 save_data(d)
                 record_edit(pairs, user, arr)
-                self._send(200, json.dumps(apply_spu_to_master(user), ensure_ascii=False))
+                # 关键：先落 Supabase（多人共享），再尽力写本地 xlsx
+                ok_n, fail_n, errs = save_spu_supabase(arr, user)
+                res = {"ok": ok_n > 0 or not arr, "cloud": ok_n,
+                       "failed": fail_n, "errors": errs[:5]}
+                try:
+                    xl = apply_spu_to_master(user)
+                    res["updated"] = xl.get("updated", 0)
+                    res["backup"] = xl.get("backup")
+                    if not xl.get("ok"):
+                        res["xlsx_msg"] = xl.get("msg", "")
+                except Exception as e:
+                    res["xlsx_msg"] = "xlsx 写入失败（不影响云端）：" + str(e)[:80]
+                if fail_n:
+                    res["msg"] = "%d 条未写入云端" % fail_n
+                self._send(200, json.dumps(res, ensure_ascii=False))
                 return
 
             # 保存需求表
