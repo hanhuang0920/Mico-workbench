@@ -300,6 +300,27 @@ def process_order(path):
             continue
         pairs_out.append(op)
 
+    # 新品里已经填了 SPU 的（货源已确认）也要落进配对，否则下次导入就丢了
+    for nv in d.get("news", []):
+        if not (nv.get("filled_spu") or "").strip():
+            continue
+        nu = norm(nv.get("url"))
+        if not nu or nu in in_order_urls:
+            continue
+        pairs_out.append({
+            "url": nv.get("url") or "",
+            "names": nv.get("names") or [nv.get("name", "")],
+            "inq": nv.get("inq") or "",
+            "spu": nv.get("filled_spu") or "",
+            "u1688": nv.get("u1688") or [],
+            "img": nv.get("img") or "",
+            "filled_spu": nv.get("filled_spu") or "",
+            "mark": None, "note": "",
+            "l1": nv.get("l1") or "", "l2": nv.get("l2") or "",
+            "l3": nv.get("l3") or "",
+        })
+        in_order_urls.add(nu)
+
     pairs = pairs_out
     pairs.sort(key=lambda x: (0 if x.get("spu") else 1, x.get("inq") or ""))
     news = news_out
@@ -844,21 +865,26 @@ def product_card(p, i=0):
     link = ('<a href="%s" target="_blank" rel="noopener">站点</a>' % esc(p["url"])) if p["url"].startswith("http") else ""
     l1688 = ('<a href="%s" target="_blank" rel="noopener">1688</a>' % esc(p["u1688"][0])) if p["u1688"] else ""
     return (
-        '<div class="pc" data-n="%s" data-s="%s" data-i="%s" data-m="%s" data-p="%s" data-q="%s" data-cn="%s">'
+        '<div class="pc" data-n="%s" data-s="%s" data-i="%s" data-m="%s" data-p="%s" data-q="%s" data-cn="%s" data-row="%s">'
         '<div class="pi">%s</div><div class="pb">'
         '<div class="pn" title="%s">%s%s %s</div>'
         '<div class="ps">%s</div>'
         '<div class="pf"><span class="iq">%s</span></div>'
+        '<div class="spuedit"><input class="libspu" data-inq="%s" data-row="%s" value="%s" placeholder="多个 SPU 用逗号分隔">'
+        '<button class="libsave" onclick="saveLibSpu(this)">存</button>'
+        '<button class="libadd" onclick="addLibSpu(this)" title="在已有 SPU 后追加">+</button></div>'
         '<div class="pl">%s %s'
         '<button class="simbtn" onclick="sim(%d,\'lib\')">相似款</button></div></div></div>' % (
             esc(name.lower() + " " + cn), esc(p["spu"].lower()), esc(p["inq"].lower()),
             "1" if p.get("multi_spu") else "0",
             "0" if p["spu"] else "1",
             "1" if not p["inq"] else "0",
-            esc(cn),
+            esc(cn), esc(str(p.get("row") or "")),
             img, esc(" ／ ".join(p["names"])), esc(name[:90]),
             ('<i>+%d</i>' % extra) if extra > 0 else "", cnb,
-            spu_html, esc(p["inq"][-14:] if p["inq"] else "—"), link, l1688, i))
+            spu_html, esc(p["inq"][-14:] if p["inq"] else "—"),
+            esc(p["inq"]), esc(str(p.get("row") or "")), esc(p["spu"]),
+            link, l1688, i))
 
 
 def pair_card(i, p):
@@ -891,8 +917,9 @@ def pair_card(i, p):
         '<div class="ps"><span class="iq">%s</span></div>'
         '%s'
         '<div class="inputrow"><label>SPU</label>'
-        '<input class="spin" data-idx="%d" value="%s" placeholder="填写 SPU">'
-        '<button class="spuq" onclick="spuNames(%d)" title="查看该 SPU 已记录的所有客户产品名">查名</button></div>'
+        '<input class="spin" data-idx="%d" value="%s" placeholder="多个用逗号分隔">'
+        '<button class="spuq" onclick="spuNames(%d)" title="查看该 SPU 已记录的所有客户产品名">查名</button>'
+        '<button class="libadd" onclick="addPairSpu(%d)" title="追加一个 SPU，不覆盖已有的">+</button></div>'
         '<div style="display:flex;gap:6px;margin-top:4px">'
         '<button class="simbtn%s" onclick="sim(%d,\'pair\')">相似款比对</button>'
         '<button class="simbtn savebtn" onclick="saveOne(%d)">保存</button>'
@@ -921,7 +948,8 @@ def news_card(i, p):
         '<input class="ci" data-idx="%d" data-k="l3" placeholder="三级" value="%s">'
         '</div>'
         '<div class="inputrow"><label>SPU</label>'
-        '<input class="spn%s" data-idx="%d" value="%s" placeholder="选填：已有货源码就填这里"></div>'
+        '<input class="spn%s" data-idx="%d" value="%s" placeholder="多个用逗号分隔">'
+        '<button class="libadd" onclick="addNewsSpu(%d)" title="追加一个 SPU，不覆盖已有的">+</button></div>'
         '<div class="pl"><a href="%s" target="_blank" rel="noopener">站点</a>'
         '<button class="simbtn%s" onclick="sim(%d,\'news\')">相似款</button>'
         '<button class="simbtn savebtn" onclick="saveNewsSpu(%d)">保存SPU</button></div>'
@@ -1124,6 +1152,16 @@ main{max-width:1560px;margin:0 auto;padding:16px 22px 60px}
 .spuq{padding:4px 7px;border-radius:6px;border:1px solid #a5b4fc;background:#eef2ff;
  color:#4338ca;font-size:10.5px;cursor:pointer;white-space:nowrap}
 .spuq:hover{background:#e0e7ff}
+.spuedit{display:flex;gap:4px;margin-top:5px;align-items:center}
+.libspu{flex:1;min-width:0;font-size:10.5px;padding:3px 6px;border:1px solid #e2e8f0;
+ border-radius:5px;font-family:ui-monospace,Consolas,monospace;outline:none;background:#fff}
+.libspu:focus{border-color:#4f46e5;background:#f8faff}
+.libsave{padding:3px 7px;border-radius:5px;border:1px solid #86efac;background:#f0fdf4;
+ color:#15803d;font-size:10.5px;cursor:pointer}
+.libsave:hover{background:#dcfce7}
+.libadd{padding:3px 7px;border-radius:5px;border:1px solid #fcd34d;background:#fffbeb;
+ color:#b45309;font-size:11px;font-weight:700;cursor:pointer;line-height:1}
+.libadd:hover{background:#fef3c7}
 .savebtn:hover{background:#ffedd5}
 .links{margin:4px 0 6px}
 .l1688{display:flex;gap:4px;margin-top:3px;align-items:center}
@@ -1454,6 +1492,74 @@ function doSave(arr,done,retry){
     }
   });
 }
+function addPairSpu(idx){
+  var el=document.querySelector('.spin[data-idx="'+idx+'"]');
+  if(!el)return;
+  var cur=el.value.trim();
+  var add=prompt('追加 SPU（已有：'+(cur||'无')+'）');
+  if(!add||!add.trim())return;
+  var list=cur?cur.split(/[,\s/;]+/).filter(Boolean):[];
+  add.split(/[,\s/;]+/).filter(Boolean).forEach(function(s){
+    if(list.indexOf(s)<0)list.push(s);
+  });
+  el.value=list.join(',');
+  el.classList.add('filled');
+  doSave([{idx:idx,spu:el.value}],false);
+}
+function addNewsSpu(idx){
+  var el=document.querySelector('.spn[data-idx="'+idx+'"]');
+  if(!el)return;
+  var cur=el.value.trim();
+  var add=prompt('追加 SPU（已有：'+(cur||'无')+'）');
+  if(!add||!add.trim())return;
+  var list=cur?cur.split(/[,\s/;]+/).filter(Boolean):[];
+  add.split(/[,\s/;]+/).filter(Boolean).forEach(function(s){
+    if(list.indexOf(s)<0)list.push(s);
+  });
+  el.value=list.join(',');
+  el.classList.add('filled');
+  saveNewsSpu(idx);
+}
+function saveLibSpu(btn){
+  var box=btn.parentNode;
+  var inp=box.querySelector('.libspu');
+  if(!inp)return;
+  var inq=inp.getAttribute('data-inq')||'';
+  var row=inp.getAttribute('data-row')||'';
+  var v=inp.value.trim();
+  fetch('/api/save-lib-spu',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({inq:inq,row:row,spu:v})}).then(function(r){
+      if(!r.ok)throw Error('HTTP '+r.status);
+      return r.json()}).then(function(d){
+    if(!d.ok){toast('保存失败：'+(d.msg||''));return}
+    var card=btn.closest('.pc');
+    if(card){
+      var ps=card.querySelector('.ps');
+      if(ps)ps.innerHTML=(d.count>1
+        ? d.spu.split(',').map(function(s){return '<b class="spu multi">'+esc2(s)+'</b>'}).join('')+'<b class="tag">多</b>'
+        : (d.spu?'<b class="spu">'+esc2(d.spu)+'</b>':'<b class="spu none">无 SPU</b>'));
+      card.dataset.s=(d.spu||'').toLowerCase();
+      card.dataset.m=d.count>1?'1':'0';
+      card.dataset.p=d.spu?'0':'1';
+    }
+    toast('产品库 SPU 已更新（'+(d.count||0)+' 个）');
+  }).catch(function(e){toast('出错：'+e)});
+}
+function addLibSpu(btn){
+  var box=btn.parentNode;
+  var inp=box.querySelector('.libspu');
+  if(!inp)return;
+  var add=prompt('追加 SPU（已有：'+(inp.value.trim()||'无')+'）');
+  if(!add||!add.trim())return;
+  var cur=inp.value.trim();
+  var list=cur?cur.split(/[,\s/;]+/).filter(Boolean):[];
+  add.split(/[,\s/;]+/).filter(Boolean).forEach(function(s){
+    if(list.indexOf(s)<0)list.push(s);
+  });
+  inp.value=list.join(',');
+  saveLibSpu(btn);
+}
+function saveLibSpuLegacy(btn){}
 function spuNames(idx){
   var el=document.querySelector('.spin[data-idx="'+idx+'"]');
   if(!el){toast('找不到输入框');return}
@@ -1944,6 +2050,51 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, json.dumps({"ok": True}, ensure_ascii=False))
                 return
 
+            # 产品库：修改/补充 SPU（支持一个产品多个 SPU）
+            if self.path == "/api/save-lib-spu":
+                payload = json.loads(raw.decode("utf-8"))
+                inq = (payload.get("inq") or "").strip()
+                row = payload.get("row")
+                raw_spu = (payload.get("spu") or "").strip()
+                spus = sb.split_spu(raw_spu)
+                spu_txt = ",".join(spus)
+                d = load_data()
+                target = None
+                for p in d.get("products", []):
+                    if inq and p.get("inq") == inq:
+                        target = p
+                        break
+                    if row is not None and str(p.get("row")) == str(row):
+                        target = p
+                        break
+                if target is None:
+                    self._send(200, json.dumps(
+                        {"ok": False, "msg": "产品库里没找到这条记录"}, ensure_ascii=False))
+                    return
+                target["spu"] = spu_txt
+                target["spus"] = spus
+                target["multi_spu"] = len(spus) > 1
+                if sb.enabled():
+                    try:
+                        match = {"inq": inq} if inq else {"url_key": sb.norm_url(target.get("url") or "")}
+                        sb.update("products", match, {"spu": spu_txt or None, "spus": spus})
+                        sb.put_spu_names([{"spu": s, "name": n, "url": target.get("url") or "",
+                                           "inq": inq} for s in spus for n in (target.get("names") or [])])
+                        sb.log_edit(user, "products", inq or target.get("url"),
+                                    "", spu_txt,
+                                    (target.get("names") or [""])[0][:80])
+                    except Exception as e:
+                        self._send(200, json.dumps(
+                            {"ok": False, "msg": "云端写入失败：%s" % str(e)[:120]},
+                            ensure_ascii=False))
+                        return
+                save_data(d)
+                invalidate_cache()
+                self._send(200, json.dumps(
+                    {"ok": True, "spu": spu_txt, "count": len(spus)},
+                    ensure_ascii=False))
+                return
+
             if self.path == "/api/export":
                 self._send(200, json.dumps(export_pairs(), ensure_ascii=False))
                 return
@@ -2033,7 +2184,8 @@ class Handler(BaseHTTPRequestHandler):
                                 "url": item.get("url") or "",
                                 "names": item.get("names") or [item.get("name", "")],
                                 "inq": item.get("inq") or "",
-                                "spu": spu, "u1688": item.get("u1688") or [],
+                                "spu": spu, "spus": sb.split_spu(spu),
+                                "u1688": item.get("u1688") or [],
                                 "img": item.get("img") or "",
                                 "filled_spu": spu, "mark": None, "note": "",
                                 "l1": item.get("l1") or "", "l2": item.get("l2") or "",
@@ -2129,9 +2281,32 @@ class Handler(BaseHTTPRequestHandler):
                                     {"ok": False, "msg": "云端移除失败：%s" % str(e)[:80]},
                                     ensure_ascii=False))
                                 return
+                        # 同款确认 = 自带 SPU → 同时写进待采集配对，保留这条的处理结果
+                        pairs_now = d.get("pairs", [])
+                        pu = norm(item.get("url"))
+                        already = any(pu and norm(p.get("url")) == pu for p in pairs_now)
+                        if not already:
+                            pairs_now.append({
+                                "url": item.get("url") or "",
+                                "names": item.get("names") or [item.get("name", "")],
+                                "inq": (cand or {}).get("inq") or "",
+                                "spu": spu_val,
+                                "u1688": (cand or {}).get("u1688") or item.get("u1688") or [],
+                                "img": item.get("img") or (cand or {}).get("img") or "",
+                                "filled_spu": spu_val, "mark": "same", "note": "",
+                                "l1": item.get("l1") or "", "l2": item.get("l2") or "",
+                                "l3": item.get("l3") or "",
+                            })
+                        d["pairs"] = pairs_now
                         lst = lst[:i2] + lst[i2 + 1:]
                         d[key] = lst
                         save_data(d)
+                        if sb.enabled() and pairs_now:
+                            try:
+                                sb.save_pairs(d.get("pairs_date") or datetime.date.today().isoformat(),
+                                              pairs_now)
+                            except Exception as e:
+                                print("[配对写入失败] %s" % e)
                         invalidate_cache()
                         self._send(200, json.dumps(
                             {"ok": True, "removed": True, "spu": spu_val},
