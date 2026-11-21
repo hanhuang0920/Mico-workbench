@@ -323,6 +323,42 @@ def get_stats():
     return out
 
 
+# ---------- 业务：SPU 关联的产品名称（一个 SPU = 多客户外语名/多站点） ----------
+def put_spu_names(items):
+    """记录 SPU→产品名/链接。items: [{spu,name,url,inq}]。表缺失时静默跳过。"""
+    rows, seen = [], set()
+    for x in items:
+        spu = (x.get("spu") or "").strip()
+        name = (x.get("name") or "").strip()[:400]
+        if not spu or not name:
+            continue
+        key = (spu, name)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append({"spu": spu, "name": name,
+                     "url": x.get("url") or "", "inq": x.get("inq") or ""})
+    if not rows:
+        return 0
+    try:
+        for i in range(0, len(rows), 200):
+            insert("spu_names", rows[i:i + 200], upsert_on="spu,name")
+    except Exception as e:
+        print("put_spu_names 失败（可能未建表）:", str(e)[:120])
+        return 0
+    return len(rows)
+
+
+def get_spu_names(spu=None):
+    params = {"select": "*", "limit": "5000", "order": "updated_at.desc"}
+    if spu:
+        params["spu"] = "eq.%s" % spu
+    try:
+        return select("spu_names", params) or []
+    except Exception:
+        return []
+
+
 # ---------- 业务：图片签名缓存（提速相似款比对） ----------
 def get_img_sigs():
     """全量读 img_sigs：{url_key: sig_tuple}。表不存在时返回空（优雅降级）。"""

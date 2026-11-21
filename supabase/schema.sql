@@ -162,3 +162,22 @@ create policy "img_sigs_upd"   on img_sigs for update using (true) with check (t
 
 -- 未询盘新品手动 SPU 列（2026-11-21 新增）
 alter table news add column if not exists filled_spu text;
+
+-- ============================================================
+-- SPU 关联产品名表（一个 SPU 可能对应多个客户外语名/多站点，方便查询）
+-- ============================================================
+create table if not exists spu_names (
+  spu        text not null,
+  name       text not null,
+  url        text,
+  inq        text,
+  updated_at timestamptz default now(),
+  primary key (spu, name)
+);
+alter table spu_names enable row level security;
+drop policy if exists "spu_names_read"  on spu_names;
+drop policy if exists "spu_names_write" on spu_names;
+drop policy if exists "spu_names_upd"   on spu_names;
+create policy "spu_names_read"  on spu_names for select using (true);
+create policy "spu_names_write" on spu_names for insert with check (true);
+create policy "spu_names_upd"   on spu_names for update using (true) with check (true);

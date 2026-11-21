@@ -489,8 +489,11 @@ def fine_dist(a, b):
 
 
 def shapdist(a, b):
-    """形状距离：仅比对裁剪归一化后的轮廓，对尺寸/裁剪/颜色都鲁棒。"""
+    """形状距离：仅比对裁剪归一化后的轮廓，对尺寸/裁剪/颜色都鲁棒。
+    shape 为 0 表示该图计算失败（不是真的相同），必须按无效值处理，否则两张失败图会被误判同款。"""
     if not a or not b or len(a) < 5 or len(b) < 5:
+        return 9999
+    if not a[4] or not b[4]:
         return 9999
     return bin(a[4] ^ b[4]).count("1")
 
@@ -668,8 +671,9 @@ CATEGORY_WORDS = {
     "焊锡钳子": ["szczypce", "pliers", "钳"],
     "梯凳": ["drabina", "ladder", "stool", "梯"],
     "胶水": ["klej", "glue", "adhesive", "胶"],
-    "皮革修复": ["leather repair", "lederreparatur", "naprawy skóry", "krem do naprawy",
-             "皮革修复", "flicken", "latka"],
+    "皮革修复": ["leather repair", "repair gel", "lederreparatur", "lederpflege",
+             "żel naprawczy", "żel do skóry", "naprawczy do skóry", "naprawy skóry",
+             "krem do naprawy", "皮革修复", "flicken", "latka"],
     "瓷砖修复": ["tile repair", "瓷砖修复"],
     "家具滑轮": ["möbelrollen", "furniture glider", "滑轮"],
     "家具搬运带": ["möbeltragegurt", "moving straps", "搬运带"],
@@ -776,7 +780,7 @@ CATEGORY_WORDS = {
     "睡衣": ["piżama", "pizama", "schlafanzug", "pyjama", "睡衣"],
     "演出服": ["kostüm", "cosplay", "halloween", "santa claus", "vampir", "服装演出", "cos"],
     # ---- 宠物 ----
-    "狗胸背带": ["geschirr", "harness", "胸背"],
+    "狗胸背带": ["geschirr", "harness", "szelki dla psa", "szelki", "uprząż", "胸背"],
     "宠物窝": ["legowisko", "pet bed", "kennel", "猫窝", "狗窝"],
     "喂食器": ["feeder", "karmnik", "fountain", "trink", "自动喂", "喂食"],
     "喂鸟器": ["bird feeder", "domek dla ptaków", "karmnik dla ptaków", "karmnik", "Vogelhaus", "鸟屋"],
@@ -952,13 +956,6 @@ def find_similar(target_names, target_img_url, pool, topn=3, min_score=0.50,
         if x.get("names") and (set(x["names"]) & tnames_set):
             continue
         ns = max((nsim(tname, n) for n in x.get("names", [])), default=0.0)
-        # ---- 中文品名粗筛：同名才精比；跨品类必须标题高度相似 ----
-        xcn = x.get("cn") or cn_for(x)
-        if tcn:
-            if xcn and xcn != tcn and ns < 0.62:
-                continue
-            if not xcn and ns < 0.45:
-                continue
         xsig, xpath = sig_for_url(x.get("img"))
         if xsig is None and xpath is not None:
             xsig = img_sig(xpath)
@@ -968,6 +965,15 @@ def find_similar(target_names, target_img_url, pool, topn=3, min_score=0.50,
         ds = sdist(tsig, xsig)
         dp = shapdist(tsig, xsig)
         df = fine_dist(tsig, xsig)
+        # 图片几乎相同 = 同款，不受标题语言/中文品名归类影响（跨语言同款的关键兜底）
+        img_tiny = (tsig is not None and xsig is not None
+                    and (d <= 60 or ds <= 70 or dp <= 60))
+        # ---- 中文品名粗筛：同名才精比；跨品类/未识别类目必须标题够像或图片极近 ----
+        xcn = x.get("cn") or cn_for(x)
+        if tcn and not img_tiny:
+            if xcn and xcn != tcn and ns < 0.62:
+                continue
+            # 认不出品类（多为其它语种的同款变体）时不硬过滤，交给图片与分数判定
         hc = cosv(thue, _hue_of(xsig)) if xsig else 0.0
         xwhite = _white_of(xsig) if xsig else 0.0
         # 双方都是白底图时，色相不可靠 → 置中性值

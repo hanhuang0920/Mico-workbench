@@ -213,68 +213,64 @@ def process_order(path):
     def pkey(rec):
         return rec.get("inq") or norm(rec.get("url"))
 
-    pairs_map, pairs_order = {}, []
+    # 旧记录只用于继承已填内容，不进入最终列表
+    pairs_map = {}
     for op in d.get("pairs", []):
-        k = pkey(op)
-        if k and k not in pairs_map:
-            pairs_map[k] = dict(op)
-            pairs_order.append(k)
-    news_map, news_order = {}, []
+        if op.get("inq"):
+            pairs_map[op["inq"]] = op
+        if op.get("url"):
+            pairs_map.setdefault(norm(op["url"]), op)
+    news_map = {}
     for op in d.get("news", []):
-        k = norm(op.get("url"))
-        if k and k not in news_map:
-            news_map[k] = dict(op)
-            news_order.append(k)
+        if op.get("url"):
+            news_map[norm(op["url"])] = op
 
     added_pairs = added_news = updated = not_inq = with_sku = 0
+    pairs_out, news_out = [], []
     for k, p in prods.items():
         hit = inq_by_url.get(k)
         if not hit:
-            # ---- 未询盘 → 新品 ----
+            # ---- 未询盘 → 新品（只在本次订单内）----
             not_inq += 1
-            if k in news_map:
-                rec = news_map[k]
-                rec["names"] = p["names"] or rec.get("names")
-                rec["img"] = p["img"] or rec.get("img") or ""
-                rec["skus"] = p["skus"] or rec.get("skus") or []
+            prev = news_map.get(k) or {}
+            if prev:
                 updated += 1
             else:
-                news_map[k] = {
-                    "url": p["url"], "name": p["names"][0] if p["names"] else "",
-                    "names": p["names"], "img": p["img"], "skus": p["skus"],
-                    "l1": "", "l2": "", "l3": "", "filled_spu": "",
-                    "mark": None, "checked": True,
-                }
-                news_order.append(k)
                 added_news += 1
+            news_out.append({
+                "url": p["url"], "name": (p["names"] or [""])[0],
+                "names": p["names"] or prev.get("names") or [],
+                "img": p["img"] or prev.get("img") or "",
+                "skus": p["skus"] or prev.get("skus") or [],
+                "l1": prev.get("l1", "") or "", "l2": prev.get("l2", "") or "",
+                "l3": prev.get("l3", "") or "",
+                "filled_spu": prev.get("filled_spu", "") or "",
+                "mark": prev.get("mark"), "checked": prev.get("checked", True),
+            })
             continue
         if p["skus"]:
             with_sku += 1
             continue
-        # ---- 已询盘无 SKU → 待采集配对 ----
-        ik = hit["inq"] or k
-        rec = pairs_map.get(ik) or pairs_map.get(k)
+        # ---- 已询盘无 SKU → 待采集配对（只在本次订单内）----
+        prev = pairs_map.get(hit["inq"]) or pairs_map.get(k) or {}
         merged_names = hit["names"] + [n for n in p["names"] if n not in hit["names"]]
-        if rec:
-            rec["names"] = merged_names
-            rec["url"] = p["url"] or rec.get("url") or ""
-            rec["spu"] = hit["spu"] or rec.get("spu") or ""
-            rec["u1688"] = hit["u1688"] or rec.get("u1688") or []
-            rec["img"] = hit["img"] or p["img"] or rec.get("img") or ""
+        if prev:
             updated += 1
         else:
-            pairs_map[ik] = {
-                "url": p["url"], "names": merged_names,
-                "inq": hit["inq"] or "", "spu": hit["spu"] or "",
-                "u1688": hit["u1688"] or [], "img": hit["img"] or p["img"] or "",
-                "filled_spu": "", "mark": None, "note": "",
-            }
-            pairs_order.append(ik)
             added_pairs += 1
+        pairs_out.append({
+            "url": p["url"] or prev.get("url") or "",
+            "names": merged_names,
+            "inq": hit["inq"] or "", "spu": hit["spu"] or prev.get("spu") or "",
+            "u1688": hit["u1688"] or prev.get("u1688") or [],
+            "img": hit["img"] or p["img"] or prev.get("img") or "",
+            "filled_spu": prev.get("filled_spu", "") or "",
+            "mark": prev.get("mark"), "note": prev.get("note") or "",
+        })
 
-    pairs = [pairs_map[k] for k in pairs_order]
+    pairs = pairs_out
     pairs.sort(key=lambda x: (0 if x.get("spu") else 1, x.get("inq") or ""))
-    news = [news_map[k] for k in news_order]
+    news = news_out
     d["pairs"] = pairs
     d["news"] = news
     d["pairs_date"] = today
@@ -651,6 +647,12 @@ def save_spu_supabase(arr, editor):
             sb.update_pair_spu(row["id"], spu, editor)
             p["id"] = row["id"]
             ok_n += 1
+            # 同一 SPU 的多个客户外语名全部记录，方便以后按 SPU 查询
+            names = p.get("names") or []
+            sb.put_spu_names([{"spu": s, "name": n, "url": p.get("url") or "",
+                               "inq": p.get("inq") or ""}
+                              for s in [y.strip() for y in re.split(r"[,\s/;]+", spu) if y.strip()]
+                              for n in names])
         except Exception as e:
             fail_n += 1
             errs.append("写入失败(%s)：%s" % (row["id"], str(e)[:80]))
@@ -856,7 +858,8 @@ def pair_card(i, p):
         '<div class="ps"><span class="iq">%s</span></div>'
         '%s'
         '<div class="inputrow"><label>SPU</label>'
-        '<input class="spin" data-idx="%d" value="%s" placeholder="填写 SPU"></div>'
+        '<input class="spin" data-idx="%d" value="%s" placeholder="填写 SPU">'
+        '<button class="spuq" onclick="spuNames(%d)" title="查看该 SPU 已记录的所有客户产品名">查名</button></div>'
         '<div style="display:flex;gap:6px;margin-top:4px">'
         '<button class="simbtn%s" onclick="sim(%d,\'pair\')">相似款比对</button>'
         '<button class="simbtn savebtn" onclick="saveOne(%d)">保存</button>'
@@ -864,7 +867,7 @@ def pair_card(i, p):
         '</div></div>' % (
             esc(p.get("inq") or ""), esc(u), esc(cn),
             img, esc(p["names"][0][:84] if p["names"] else ""), cnb,
-            esc((p.get("inq") or "")[-14:]), l1688, i, esc(cur),
+            esc((p.get("inq") or "")[-14:]), l1688, i, esc(cur), i,
             " done" if p.get("mark") == "same" else "", i, i))
 
 
@@ -1085,6 +1088,9 @@ main{max-width:1560px;margin:0 auto;padding:16px 22px 60px}
  color:#4338ca;font-size:10.5px;font-weight:600;cursor:pointer;font-family:inherit}
 .simbtn:hover{background:#e0e7ff}
 .savebtn{border-color:#fdba74;background:#fff7ed;color:#c2410c}
+.spuq{padding:4px 7px;border-radius:6px;border:1px solid #a5b4fc;background:#eef2ff;
+ color:#4338ca;font-size:10.5px;cursor:pointer;white-space:nowrap}
+.spuq:hover{background:#e0e7ff}
 .savebtn:hover{background:#ffedd5}
 .links{margin:4px 0 6px}
 .l1688{display:flex;gap:4px;margin-top:3px;align-items:center}
@@ -1414,6 +1420,40 @@ function doSave(arr,done,retry){
       toast('保存失败：服务可能在冷启动，1 分钟后再试（'+e+'）');
     }
   });
+}
+function spuNames(idx){
+  var el=document.querySelector('.spin[data-idx="'+idx+'"]');
+  if(!el){toast('找不到输入框');return}
+  var spu=el.value.trim();
+  if(!spu){toast('先填 SPU 再查');return}
+  var m=document.getElementById('modal'), b=document.getElementById('mbody');
+  b.innerHTML='<div class="simempty">正在查询 '+esc2(spu)+' 关联的产品名…</div>';
+  m.classList.add('on');
+  fetch('/api/spu-names?spu='+encodeURIComponent(spu)).then(function(r){return r.json()})
+  .then(function(d){
+    var its=(d.items||[]);
+    var h='<div style="font-weight:700;margin-bottom:8px">SPU <span class="iq">'+esc2(spu)+'</span> 关联的产品名（'+its.length+'）</div>';
+    if(!its.length){
+      h+='<div class="simempty">还没有记录。保存一次 SPU 后就会记录当前产品的所有客户产品名。</div>';
+    }else{
+      its.forEach(function(it){
+        h+='<div class="cmp" style="align-items:flex-start">'
+          +'<div class="cmpinfo" style="flex:1">'
+          +'<div class="cn">'+esc2(it.name||'')+'</div>'
+          +'<div class="pl">'+(it.url?'<a href="'+esc2(it.url)+'" target="_blank">站点</a>':'')
+          +'<span class="iq">'+esc2((it.inq||'').slice(-14))+'</span>'
+          +'<button class="simbtn" onclick="copyTxt(this)" data-t="'+esc2(it.name||'')+'">复制名</button></div>'
+          +'</div></div>';
+      });
+    }
+    b.innerHTML=h;
+  }).catch(function(e){b.innerHTML='<div class="simempty">出错：'+esc2(e)+'</div>'});
+}
+function copyTxt(el){
+  var t=el.getAttribute('data-t')||'';
+  try{navigator.clipboard.writeText(t);toast('已复制产品名');return}catch(e){}
+  var ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta);
+  ta.select(); document.execCommand('copy'); document.body.removeChild(ta); toast('已复制产品名');
 }
 function saveOne(idx){
   var el=document.querySelector('.spin[data-idx="'+idx+'"]');
@@ -1863,6 +1903,21 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, json.dumps(export_pairs(), ensure_ascii=False))
                 return
 
+            # 按 SPU 查该货号关联的所有客户产品名
+            if self.path.startswith("/api/spu-names"):
+                from urllib.parse import unquote
+                q = unquote(self.path.split("?", 1)[1]) if "?" in self.path else ""
+                spu = ""
+                for kv in q.split("&"):
+                    if kv.startswith("spu="):
+                        spu = kv[4:].strip()
+                rows = sb.get_spu_names(spu) if sb.enabled() else []
+                out = [{"spu": r.get("spu"), "name": r.get("name"),
+                        "url": r.get("url"), "inq": r.get("inq")} for r in rows]
+                self._send(200, json.dumps({"ok": True, "spu": spu, "items": out},
+                                           ensure_ascii=False))
+                return
+
             if self.path == "/api/export-demand":
                 self._send(200, json.dumps(export_demand(), ensure_ascii=False))
                 return
@@ -1928,6 +1983,15 @@ class Handler(BaseHTTPRequestHandler):
                             continue
                     # 有 SPU = 货源已确认 → 移入待采集配对
                     if spu:
+                        if sb.enabled():
+                            try:
+                                sb.put_spu_names([{"spu": y.strip(), "name": n,
+                                                   "url": item.get("url") or "",
+                                                   "inq": item.get("inq") or ""}
+                                                  for y in re.split(r"[,\s/;]+", spu) if y.strip()
+                                                  for n in (item.get("names") or [item.get("name", "")])])
+                            except Exception:
+                                pass
                         u = norm(item.get("url"))
                         dup = any(norm(p.get("url")) == u for p in pairs if p.get("url"))
                         if not dup and u:
