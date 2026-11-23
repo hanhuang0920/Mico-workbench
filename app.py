@@ -248,22 +248,37 @@ def process_order(path):
 
     added_pairs = added_news = updated = not_inq = with_sku = 0
     pairs_out, news_out = [], []
-    img_auto = []          # 靠图片自动认出是库内同款的（跨站点不同语言标题）
+    img_auto = []          # 靠图片/规格自动认出是库内同款的（跨站点不同语言标题）
     for k, p in prods.items():
         hit = lib_hit(k, p)
-        if not hit and p.get("img"):
-            # 标题/链接都认不出时，用图片再判一次（只认极像的，避免误判）
-            try:
-                hit, dist = similar.find_same_by_image(p["img"], libs)
-            except Exception:
-                hit, dist = None, None
-            if hit is not None:
-                img_auto.append({
-                    "name": (p.get("names") or [""])[0][:70],
-                    "matched": (hit.get("names") or [""])[0][:70],
-                    "spu": hit.get("spu") or "",
-                    "dist": dist,
-                })
+        how = "url/title" if hit else ""
+        dist = None
+        if not hit:
+            # 通道1：图片极像
+            if p.get("img"):
+                try:
+                    hit, dist = similar.find_same_by_image(p["img"], libs)
+                except Exception:
+                    hit, dist = None, None
+                if hit is not None:
+                    how = "image"
+            # 通道2：标题规格参数一致（同款不同配色，图片差异大）
+            if not hit:
+                try:
+                    hit2, info2 = similar.find_same_by_title_spec(
+                        p.get("names") or [], libs)
+                except Exception:
+                    hit2, info2 = None, None
+                if hit2 is not None:
+                    hit, dist, how = hit2, info2, "spec"
+        if hit is not None and how in ("image", "spec"):
+            img_auto.append({
+                "name": (p.get("names") or [""])[0][:70],
+                "matched": (hit.get("names") or [""])[0][:70],
+                "spu": hit.get("spu") or "",
+                "how": how,
+                "dist": dist,
+            })
         if not hit:
             # ---- 未询盘 → 新品（只在本次订单内）----
             not_inq += 1
@@ -916,21 +931,23 @@ def product_card(p, i=0):
             link, l1688, i))
 
 
-def pair_card(i, p):
-    img = ('<img src="%s" loading="lazy">' % esc(p["img"])) if p["img"] else '<span class="nopic">无图</span>'
+def pair_card(p, i=0):
+    """p 为 merge_by_spu 的合并组（含 _members/_idx）。"""
+    img = ('<img src="%s" loading="lazy">' % esc(p["img"])) if p.get("img") else '<span class="nopic">无图</span>'
     cur = p.get("filled_spu") or p.get("spu") or ""
     links = sb.uniq_urls(p.get("u1688"))
+    rows = ""
     if links:
-        rows = "".join(
+        rows += "".join(
             '<div class="l1688"><input class="i1688" readonly value="%s" '
             'onclick="this.select();document.execCommand(\'copy\')" '
             'onfocus="this.select()" title="点击即复制">'
             '<a href="%s" target="_blank" rel="noopener">打开</a></div>'
             % (esc(u), esc(u)) for u in links)
     else:
-        rows = '<div class="l1688"><span class="nolink">无 1688 链接</span></div>'
-    u = p.get("url") or ""
-    if u.startswith("http"):
+        rows += '<div class="l1688"><span class="nolink">无 1688 链接</span></div>'
+    urls = [u for u in (p.get("urls") or [p.get("url") or ""]) if u and u.startswith("http")]
+    for u in urls:
         short = re.sub(r"^https?://(www\.)?", "", u)
         if len(short) > 34:
             short = short[:34] + "…"
@@ -938,15 +955,25 @@ def pair_card(i, p):
                  'title="%s" class="siteurl">&#127761; %s</a></div>'
                  % (esc(u), esc(u), esc(short)))
     l1688 = '<div class="links">%s</div>' % rows
+    names = [n for n in (p.get("names") or []) if n]
+    if len(names) > 1:
+        names_html = "".join('<div class="nmrow">%s</div>' % esc(n[:100]) for n in names)
+        title_html = '<div class="pn names">%s</div>' % names_html
+    else:
+        title_html = '<div class="pn">%s</div>' % esc((names[0] if names else "")[:84])
     cn = similar.cn_for(p)
     cnb = cn_badge(cn)
+    inqs = [x for x in (p.get("inqs") or []) if x]
+    inq_txt = "、".join(x[-6:] for x in inqs) if inqs else "—"
+    idxs = p.get("_idx") or [i]
+    idx_attr = ",".join(str(x) for x in idxs)
     return (
-        '<div class="paircard" data-inq="%s" data-url="%s" data-cn="%s"><div class="pi">%s</div><div class="pb">'
-        '<div class="pn">%s %s</div>'
-        '<div class="ps"><span class="iq">%s</span></div>'
+        '<div class="paircard" data-inq="%s" data-url="%s" data-cn="%s" data-idxs="%s"><div class="pi">%s</div><div class="pb">'
+        '%s %s'
+        '<div class="ps"><span class="iq">%s</span>%s</div>'
         '%s'
         '<div class="inputrow"><label>SPU</label>'
-        '<input class="spin" data-idx="%d" value="%s" placeholder="多个用逗号分隔">'
+        '<input class="spin" data-idx="%d" data-idxs="%s" value="%s" placeholder="多个用逗号分隔">'
         '<button class="spuq" onclick="spuNames(%d)" title="查看该 SPU 已记录的所有客户产品名">查名</button>'
         '<button class="libadd" onclick="addPairSpu(%d)" title="追加一个 SPU，不覆盖已有的">+</button></div>'
         '<div style="display:flex;gap:6px;margin-top:4px">'
@@ -954,9 +981,11 @@ def pair_card(i, p):
         '<button class="simbtn savebtn" onclick="saveOne(%d)">保存</button>'
         '</div>'
         '</div></div>' % (
-            esc(p.get("inq") or ""), esc(u), esc(cn),
-            img, esc(p["names"][0][:84] if p["names"] else ""), cnb,
-            esc((p.get("inq") or "")[-14:]), l1688, i, esc(cur), i, i,
+            esc((inqs[0] if inqs else "")), esc(urls[0] if urls else ""), esc(cn), esc(idx_attr),
+            img, title_html, cnb,
+            esc(inq_txt),
+            ('<i class="tag">合并%d</i>' % len(idxs)) if len(idxs) > 1 else "",
+            l1688, i, esc(idx_attr), esc(cur), i, i,
             " done" if p.get("mark") == "same" else "", i, i))
 
 
@@ -966,28 +995,44 @@ def news_card(i, p):
     cn = similar.cn_for(p)
     cnb = cn_badge(cn)
     spu_v = p.get("filled_spu") or ""
+    names = [n for n in (p.get("names") or [p.get("name") or ""]) if n]
+    if len(names) > 1:
+        names_html = "".join('<div class="nmrow">%s</div>' % esc(n[:100]) for n in names)
+        title_html = '<div class="pn names">%s %s</div>' % (names_html, cnb)
+    else:
+        nm0 = names[0] if names else ""
+        title_html = '<div class="pn" title="%s">%s %s</div>' % (esc(nm0), esc(nm0[:80]), cnb)
+    urls = [u for u in (p.get("urls") or [p.get("url") or ""]) if u and u.startswith("http")]
+    if len(urls) > 1:
+        site_html = "".join(
+            '<div class="l1688"><a href="%s" target="_blank" rel="noopener" class="siteurl">&#127761; %s</a></div>'
+            % (esc(u), esc(re.sub(r"^https?://(www\.)?", "", u)[:38])) for u in urls)
+        site_html = '<div class="links sitelist">%s</div>' % site_html
+    else:
+        site_html = '<a href="%s" target="_blank" rel="noopener">站点</a>' % (esc(urls[0]) if urls else "")
+    idxs = p.get("_idx") or [i]
+    idx_attr = ",".join(str(x) for x in idxs)
     return (
-        '<div class="newscard" data-idx="%d">'
+        '<div class="newscard" data-idx="%d" data-idxs="%s">'
         '<label class="chk"><input type="checkbox" data-idx="%d" %s></label>'
         '<div class="pi">%s</div><div class="pb">'
-        '<div class="pn" title="%s">%s %s</div>'
+        '%s'
         '<div class="cat3">'
         '<input class="ci" data-idx="%d" data-k="l1" placeholder="一级" value="%s">'
         '<input class="ci" data-idx="%d" data-k="l2" placeholder="二级" value="%s">'
         '<input class="ci" data-idx="%d" data-k="l3" placeholder="三级" value="%s">'
         '</div>'
         '<div class="inputrow"><label>SPU</label>'
-        '<input class="spn%s" data-idx="%d" value="%s" placeholder="多个用逗号分隔">'
+        '<input class="spn%s" data-idx="%d" data-idxs="%s" value="%s" placeholder="多个用逗号分隔">'
         '<button class="libadd" onclick="addNewsSpu(%d)" title="追加一个 SPU，不覆盖已有的">+</button></div>'
-        '<div class="pl"><a href="%s" target="_blank" rel="noopener">站点</a>'
+        '<div class="pl">%s'
         '<button class="simbtn%s" onclick="sim(%d,\'news\')">相似款</button>'
         '<button class="simbtn savebtn" onclick="saveNewsSpu(%d)">保存SPU</button></div>'
         '</div></div>' % (
-            i, i, checked, img,
-            esc(p.get("name", "")), esc(p.get("name", "")[:80]), cnb,
+            i, esc(idx_attr), i, checked, img, title_html,
             i, esc(p.get("l1", "")), i, esc(p.get("l2", "")), i, esc(p.get("l3", "")),
-            " filled" if spu_v else "", i, esc(spu_v), i,
-            esc(p.get("url", "")),
+            " filled" if spu_v else "", i, esc(idx_attr), esc(spu_v), i,
+            site_html,
             " done" if p.get("mark") == "same" else "", i, i))
 
 
@@ -1039,20 +1084,29 @@ def page_login(err=""):
 CURRENT_USER = {"name": ""}
 
 
-def merge_by_spu(prods):
-    """相同 SPU 的产品合并为一条展示记录（一个货号多站点多名称）。"""
+def merge_by_spu(prods, with_idx=False):
+    """相同 SPU 的卡片合并为一条展示记录（一个货号多站点多名称）。
+    with_idx=True 时，记录组内成员在原始列表中的下标（保存时整组写入）。"""
     groups, order = {}, []
-    for p in prods:
+    for i, p in enumerate(prods):
         spus = [s for s in (p.get("spus") or ([p["spu"]] if p.get("spu") else [])) if s]
+        if not spus:
+            fs = (p.get("filled_spu") or "").strip()
+            if fs:
+                spus = sb.split_spu(fs)
+        spus = [s for s in spus if s]
         key = spus[0] if len(spus) == 1 else None
         k = ("SPU", key) if key else ("ROW", id(p))
         if k not in groups:
-            groups[k] = dict(p)
-            groups[k]["names"] = list(p.get("names") or [])
-            groups[k]["urls"] = [(p.get("url") or "")]
-            groups[k]["inqs"] = [p.get("inq") or ""]
-            groups[k]["u1688"] = list(p.get("u1688") or [])
-            groups[k]["_members"] = [p]
+            g = dict(p)
+            g["names"] = list(p.get("names") or [])
+            g["urls"] = [p.get("url") or ""]
+            g["inqs"] = [p.get("inq") or ""]
+            g["u1688"] = list(p.get("u1688") or [])
+            g["_members"] = [p]
+            g["_idx"] = [i]
+            g["_key"] = key or ""
+            groups[k] = g
             order.append(k)
             continue
         g = groups[k]
@@ -1070,9 +1124,11 @@ def merge_by_spu(prods):
                 g["u1688"].append(x)
         if not g.get("img") and p.get("img"):
             g["img"] = p["img"]
+        if not (g.get("filled_spu") or "").strip() and (p.get("filled_spu") or "").strip():
+            g["filled_spu"] = p["filled_spu"]
         g["_members"].append(p)
-    out = [groups[k] for k in order]
-    return out
+        g["_idx"].append(i)
+    return [groups[k] for k in order]
 
 
 def page_index():
@@ -1084,11 +1140,11 @@ def page_index():
     n_noiq = sum(1 for p in prods if not p["inq"])
 
     cards = "".join(product_card(p, i) for i, p in enumerate(merge_by_spu(prods)))
-    pcards = "".join(pair_card(i, p) for i, p in enumerate(pairs))
+    pcards = "".join(pair_card(g, i) for i, g in enumerate(merge_by_spu(pairs, with_idx=True)))
     no_pairs = '<div class="empty">还没有配对数据<br><span>请在 ① 上传今日订单文件</span></div>' if not pairs else ""
 
     news = d.get("news", [])
-    ncards = "".join(news_card(i, p) for i, p in enumerate(news))
+    ncards = "".join(news_card(g, i) for i, g in enumerate(merge_by_spu(news, with_idx=True)))
     no_news = '<div class="empty">还没有未询盘产品<br><span>请在 ① 上传今日订单文件</span></div>' if not news else ""
 
     return PAGE_TPL \
@@ -1664,13 +1720,19 @@ function copyTxt(el){
   var ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta);
   ta.select(); document.execCommand('copy'); document.body.removeChild(ta); toast('已复制产品名');
 }
+function groupIdxs(el,idx){
+  var s=el&&el.getAttribute('data-idxs');
+  if(!s)return [idx];
+  return s.split(',').map(function(x){return parseInt(x,10)}).filter(function(x){return !isNaN(x)});
+}
 function saveOne(idx){
   var el=document.querySelector('.spin[data-idx="'+idx+'"]');
   if(!el){toast('找不到输入框');return}
   var v=el.value.trim();
   if(!v){toast('这条还没填 SPU');return}
   el.classList.add('filled');
-  doSave([{idx:idx,spu:v}],false);
+  var arr=groupIdxs(el,idx).map(function(k){return {idx:k,spu:v}});
+  doSave(arr,false);
 }
 function saveSpuAll(){
   saveDemand();
@@ -1696,16 +1758,17 @@ function saveNewsSpu(idx){
   if(!el){toast('未找到输入框');return}
   var v=el.value.trim();
   if(!v){toast('这条还没填 SPU');return}
+  var items=groupIdxs(el,idx).map(function(k){return {idx:k,spu:v}});
   fetch('/api/save-news-spu',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({items:[{idx:idx,spu:v}]})}).then(function(r){
+    body:JSON.stringify({items:items})}).then(function(r){
       if(!r.ok)throw Error('HTTP '+r.status);
       return r.json()})
   .then(function(d){
     if(!d.ok){toast('写入失败：'+(d.errors&&d.errors[0]||'未知错误'));return}
     el.classList.add('filled');
-    if(d.removed){
-      toast('SPU 已保存，该新品已剔除');
-      setTimeout(function(){location.reload()},900);
+    if(d.moved){
+      toast('SPU 已保存，'+d.moved+' 款已移入待采集配对');
+      setTimeout(function(){location.reload()},1000);
     }else{
       toast('SPU 已保存到云端');
     }

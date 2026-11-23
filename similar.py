@@ -925,6 +925,55 @@ def cat_overlap(a_names, b_names):
     return ca & cb, ca, cb
 
 
+def _spec_tokens(text):
+    """抽取标题里的规格参数：尺寸(50x138)、容量(mAh/L/ml)、功率(W)、数量等。"""
+    t = str(text or "").lower().replace("×", "x").replace("*", "x")
+    out = set()
+    # 尺寸 50x138 / 90x45
+    for a, b in re.findall(r"(\d{2,3})\s*x\s*(\d{2,3})", t):
+        out.add("%sx%s" % (a, b))
+    # 带单位的数值
+    for v, u in re.findall(r"(\d+(?:[.,]\d+)?)\s*(mm|cm|ml|l|w|mah|kg|g|v|inch|in|zoll)\b", t):
+        v = v.replace(",", ".")
+        out.add(v + u)
+    return out
+
+
+def find_same_by_title_spec(target_names, pool, exclude_url=None):
+    """标题规格参数兜底：像「皮革修补贴 50x138」这种，同款不同配色时图片差异大，
+    但标题里的规格数字一致 + 品名词一致，就基本可确定是同一款。"""
+    tname = (target_names or [""])[0]
+    tspec = _spec_tokens(tname)
+    if not tspec:
+        return None, None
+    tcn = cn_of_names(target_names)
+    tu = norm(exclude_url or "")
+    best, best_info = None, None
+    for x in pool:
+        if tu and norm(x.get("url")) == tu:
+            continue
+        xs = set()
+        for n in (x.get("names") or [""])[:3]:
+            xs |= _spec_tokens(n)
+        common = tspec & xs
+        if not common:
+            continue
+        # 规格必须覆盖主要参数（至少一个，且不能只是很小的巧合）
+        if len(common) < 1:
+            continue
+        xcn = cn_of_names(x.get("names") or [""])
+        # 品名相同 → 强证据；品名不同则要求 2 个以上规格重合
+        if tcn and xcn and tcn == xcn:
+            score = 2
+        elif len(common) >= 2:
+            score = 1
+        else:
+            continue
+        if best is None or score > best_info["score"]:
+            best, best_info = x, {"spec": sorted(common), "cn": xcn, "score": score}
+    return best, best_info
+
+
 def find_same_by_image(target_img_url, pool, exclude_url=None):
     """按图片判定库内同款（跨站点、不同语言标题的场景）。
     严格三重条件——宁可漏判，也绝不误带 SPU：
