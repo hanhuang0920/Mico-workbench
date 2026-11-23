@@ -1612,7 +1612,7 @@ function saveLibSpu(btn){
       card.dataset.m=d.count>1?'1':'0';
       card.dataset.p=d.spu?'0':'1';
     }
-    toast('产品库 SPU 已更新（'+(d.count||0)+' 个）');
+    toast('产品库 SPU 已更新（'+(d.count||0)+' 个'+(d.merged>1?'，合并 '+(d.merged-1)+' 条同名产品':'')+'）');
   }).catch(function(e){toast('出错：'+e)});
 }
 function addLibSpu(btn){
