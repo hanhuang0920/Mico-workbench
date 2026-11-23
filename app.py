@@ -306,10 +306,16 @@ def process_order(path):
         merged_names = hit["names"] + [n for n in p["names"] if n not in hit["names"]]
         iq = hit["inq"] or ""
         spu_key = (hit.get("spu") or "").strip()
-        # 同一产品（同 SPU）在多个站点被询盘时只留一条；各站询盘号都记下
+        # 同一产品只留一条：优先按 SPU，其次按询盘号，最后按规范化链接
         exist = None
         for x in pairs_out:
             if spu_key and (x.get("spu") or "").strip() == spu_key:
+                exist = x
+                break
+            if iq and (x.get("inq") or "") == iq:
+                exist = x
+                break
+            if p["url"] and norm(x.get("url")) == norm(p["url"]):
                 exist = x
                 break
         if exist is not None:
