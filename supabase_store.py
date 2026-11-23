@@ -130,6 +130,27 @@ def uniq_urls(arr):
 
 
 # ---------- 业务：产品 ----------
+def insert_products(items):
+    """纯新增（不按 url_key 合并）。用于同一产品在不同站点的多个询盘号记录。"""
+    rows = []
+    for p in items:
+        rows.append({
+            "row_no": p.get("row"),
+            "names": p.get("names") or [],
+            "url": p.get("url") or "",
+            "url_key": norm_url(p.get("url")),
+            "inq": p.get("inq") or None,
+            "batch": p.get("batch") or None,
+            "spu": p.get("spu") or None,
+            "spus": p.get("spus") or split_spu(p.get("spu")),
+            "u1688": uniq_urls(p.get("u1688")),
+            "img": p.get("img") or None,
+        })
+    for i in range(0, len(rows), 200):
+        insert("products", rows[i:i + 200])
+    return len(rows)
+
+
 def upsert_products(items):
     """items: [{row, names, url, inq, batch, spu, spus, u1688, img}]"""
     rows = []
@@ -148,7 +169,11 @@ def upsert_products(items):
         })
     # 分批，避免单次请求过大
     for i in range(0, len(rows), 200):
-        insert("products", rows[i:i + 200], upsert_on="url_key")
+        try:
+            insert("products", rows[i:i + 200], upsert_on="url_key,inq")
+        except Exception:
+            # 老库还没换成 (url_key,inq) 唯一索引时，退回按 url_key 合并
+            insert("products", rows[i:i + 200], upsert_on="url_key")
     return len(rows)
 
 

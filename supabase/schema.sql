@@ -20,7 +20,12 @@ create table if not exists products (
   updated_at  timestamptz default now()
 );
 
-create unique index if not exists products_url_key_idx on products (url_key);
+-- 同一产品的不同站点/不同询盘号各自成行，所以 url_key 不能唯一。
+-- 但「同链接 + 同询盘号」仍然必须唯一（防止真正的重复录入）。
+drop index if exists products_url_key_idx;
+create index if not exists products_url_idx on products (url_key);
+create unique index if not exists products_url_inq_uniq
+  on products (url_key, coalesce(inq, ''));
 create index if not exists products_spu_idx on products (spu);
 create index if not exists products_inq_idx on products (inq);
 
