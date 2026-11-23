@@ -304,6 +304,26 @@ def process_order(path):
         # ---- 已询盘无 SKU → 待采集配对（只在本次订单内）----
         prev = pairs_map.get(hit["inq"]) or pairs_map.get(k) or {}
         merged_names = hit["names"] + [n for n in p["names"] if n not in hit["names"]]
+        iq = hit["inq"] or ""
+        # 同一询盘号 = 同一产品：多站点只留一条，标题/链接并入
+        exist = None
+        if iq:
+            exist = next((x for x in pairs_out if x.get("inq") == iq), None)
+        if exist is not None:
+            for n in merged_names:
+                if n not in exist["names"]:
+                    exist["names"].append(n)
+            if not exist.get("url") and p["url"]:
+                exist["url"] = p["url"]
+            if not exist.get("img") and (hit["img"] or p["img"]):
+                exist["img"] = hit["img"] or p["img"]
+            alt = exist.setdefault("alt_urls", [])
+            if p["url"] and p["url"] != exist.get("url") and p["url"] not in alt:
+                alt.append(p["url"])
+            if prev and not (exist.get("filled_spu") or "").strip():
+                exist["filled_spu"] = prev.get("filled_spu", "") or ""
+            updated += 1
+            continue
         if prev:
             updated += 1
         else:
@@ -311,7 +331,7 @@ def process_order(path):
         pairs_out.append({
             "url": p["url"] or prev.get("url") or "",
             "names": merged_names,
-            "inq": hit["inq"] or "", "spu": hit["spu"] or prev.get("spu") or "",
+            "inq": iq, "spu": hit["spu"] or prev.get("spu") or "",
             "u1688": hit["u1688"] or prev.get("u1688") or [],
             "img": hit["img"] or p["img"] or prev.get("img") or "",
             "filled_spu": prev.get("filled_spu", "") or "",
