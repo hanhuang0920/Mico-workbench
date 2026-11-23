@@ -1881,10 +1881,22 @@ function exportDemand(){
   if(!n){toast('请至少勾选 1 款');return}
   saveDemand().then(function(){
     return fetch('/api/export-demand',{method:'POST'});
-  }).then(function(r){return r.json()})
-  .then(function(d){
-    if(!d.ok){toast('失败：'+(d.msg||''));return}
-    toast('已导出 '+d.file+'（'+d.count+' 款）');
+  }).then(function(r){
+    var ct=r.headers.get('Content-Type')||'';
+    if(ct.indexOf('spreadsheet')>=0){
+      return r.blob().then(function(bl){
+        var cd=r.headers.get('Content-Disposition')||'';
+        var m=/filename\*=UTF-8''([^;]+)/.exec(cd);
+        var name=m?decodeURIComponent(m[1]):'询盘需求表.xlsx';
+        var a=document.createElement('a');
+        a.href=URL.createObjectURL(bl);
+        a.download=name;
+        document.body.appendChild(a); a.click();
+        setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},1500);
+        toast('已下载 '+name);
+      });
+    }
+    return r.json().then(function(d){toast('失败：'+(d.msg||'未知'))});
   }).catch(function(e){toast('出错：'+e)});
 }
 var SIMKIND='pair', SIMIDX=-1;
@@ -2285,7 +2297,22 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if self.path == "/api/export-demand":
-                self._send(200, json.dumps(export_demand(), ensure_ascii=False))
+                res = export_demand()
+                if res.get("ok"):
+                    fp = os.path.join(BASE, res["file"])
+                    try:
+                        with open(fp, "rb") as f:
+                            data = f.read()
+                        self._send(200, data,
+                                   "application/vnd.openxmlformats-officedocument"
+                                   ".spreadsheetml.sheet",
+                                   [("Content-Disposition",
+                                     "attachment; filename*=UTF-8''%s"
+                                     % quote(res["file"]))])
+                        return
+                    except Exception as e:
+                        res = {"ok": False, "msg": "读取文件失败：%s" % str(e)[:80]}
+                self._send(200, json.dumps(res, ensure_ascii=False))
                 return
 
             if self.path == "/api/similar":
