@@ -989,7 +989,7 @@ def pair_card(p, i=0):
             " done" if p.get("mark") == "same" else "", i, i))
 
 
-def news_card(i, p):
+def news_card(p, i=0):
     img = ('<img src="%s" loading="lazy">' % esc(p["img"])) if p.get("img") else '<span class="nopic">无图</span>'
     checked = "checked" if p.get("checked", True) else ""
     cn = similar.cn_for(p)
@@ -1139,28 +1139,32 @@ def page_index():
     n_multi = sum(1 for p in prods if p.get("multi_spu"))
     n_noiq = sum(1 for p in prods if not p["inq"])
 
-    cards = "".join(product_card(p, i) for i, p in enumerate(merge_by_spu(prods)))
-    pcards = "".join(pair_card(g, i) for i, g in enumerate(merge_by_spu(pairs, with_idx=True)))
+    prod_groups = merge_by_spu(prods)
+    pair_groups = merge_by_spu(pairs, with_idx=True)
+    news = d.get("news", [])
+    news_groups = merge_by_spu(news, with_idx=True)
+
+    cards = "".join(product_card(p, i) for i, p in enumerate(prod_groups))
+    pcards = "".join(pair_card(g, i) for i, g in enumerate(pair_groups))
     no_pairs = '<div class="empty">还没有配对数据<br><span>请在 ① 上传今日订单文件</span></div>' if not pairs else ""
 
-    news = d.get("news", [])
-    ncards = "".join(news_card(g, i) for i, g in enumerate(merge_by_spu(news, with_idx=True)))
+    ncards = "".join(news_card(g, i) for i, g in enumerate(news_groups))
     no_news = '<div class="empty">还没有未询盘产品<br><span>请在 ① 上传今日订单文件</span></div>' if not news else ""
 
     return PAGE_TPL \
         .replace("{{USER}}", esc(CURRENT_USER.get("name", ""))) \
-        .replace("{{TOTAL}}", str(len(prods))) \
+        .replace("{{TOTAL}}", str(len(prod_groups))) \
         .replace("{{NSPU}}", str(n_spu)) \
         .replace("{{NMULTI}}", str(n_multi)) \
         .replace("{{NNOIQ}}", str(n_noiq)) \
-        .replace("{{NPAIRS}}", str(len(pairs))) \
+        .replace("{{NPAIRS}}", str(len(pair_groups))) \
         .replace("{{PER}}", str(PER_PAGE)) \
         .replace("{{CARDS}}", cards) \
         .replace("{{PCARDS}}", pcards) \
         .replace("{{EMPTY}}", no_pairs) \
         .replace("{{NCARDS}}", ncards) \
         .replace("{{NONEWS}}", no_news) \
-        .replace("{{NNEWS}}", str(len(news)))
+        .replace("{{NNEWS}}", str(len(news_groups)))
 
 
 PAGE_TPL = r"""<!DOCTYPE html>
