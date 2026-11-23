@@ -203,11 +203,21 @@ def clear_pairs(date_str):
 
 
 def save_pairs(date_str, items):
-    clear_pairs(date_str)
+    """保存配对。items 可能来自多个日期（页面上不再按日期过滤），
+    所以每条优先用自己的 date 字段，避免把旧记录都改成今天。"""
+    # 只清理本次涉及的日期
+    dates = {date_str}
+    for p in items:
+        dd = p.get("date") or p.get("work_date")
+        if dd:
+            dates.add(str(dd))
+    for dd in dates:
+        clear_pairs(dd)
     rows = []
     for p in items:
+        dd = p.get("date") or p.get("work_date") or date_str
         rows.append({
-            "work_date": date_str,
+            "work_date": str(dd),
             "url": p.get("url"),
             "names": p.get("names") or [],
             "inq": p.get("inq") or None,
@@ -231,6 +241,8 @@ def get_pairs(date_str=None):
     for r in rows:
         out.append({
             "id": r.get("id"),
+            "date": str(r.get("work_date") or ""),
+            "work_date": str(r.get("work_date") or ""),
             "url": r.get("url") or "",
             "names": r.get("names") or [],
             "inq": r.get("inq") or "",

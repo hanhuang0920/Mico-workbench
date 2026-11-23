@@ -72,10 +72,10 @@ def load_data():
         try:
             prods = sb.get_products()
             today = datetime.date.today().isoformat()
-            pairs = sb.get_pairs(today)
+            # 待采集配对是持续处理的清单，不按日期过滤（旧日期未完成的也要看到）
+            pairs = sb.get_pairs()
             news = sb.get_news(today)
-            if not pairs and not news:
-                pairs = sb.get_pairs()
+            if not news:
                 news = sb.get_news()
             data = {"products": prods, "pairs": pairs, "news": news,
                     "pairs_date": today, "updated": "Supabase", "source": "supabase"}
