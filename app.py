@@ -248,8 +248,22 @@ def process_order(path):
 
     added_pairs = added_news = updated = not_inq = with_sku = 0
     pairs_out, news_out = [], []
+    img_auto = []          # 靠图片自动认出是库内同款的（跨站点不同语言标题）
     for k, p in prods.items():
         hit = lib_hit(k, p)
+        if not hit and p.get("img"):
+            # 标题/链接都认不出时，用图片再判一次（只认极像的，避免误判）
+            try:
+                hit, dist = similar.find_same_by_image(p["img"], libs)
+            except Exception:
+                hit, dist = None, None
+            if hit is not None:
+                img_auto.append({
+                    "name": (p.get("names") or [""])[0][:70],
+                    "matched": (hit.get("names") or [""])[0][:70],
+                    "spu": hit.get("spu") or "",
+                    "dist": dist,
+                })
         if not hit:
             # ---- 未询盘 → 新品（只在本次订单内）----
             not_inq += 1
@@ -317,7 +331,8 @@ def process_order(path):
     return {"ok": True, "total": len(prods), "inq": len(prods) - not_inq,
             "with_sku": with_sku, "pairs": len(pairs), "not_inq": not_inq,
             "news": len(news), "added_pairs": added_pairs,
-            "added_news": added_news, "updated": updated}
+            "added_news": added_news, "updated": updated,
+            "img_auto": len(img_auto), "img_auto_detail": img_auto[:20]}
 
 
 def import_quotes(path):
@@ -862,12 +877,27 @@ def product_card(p, i=0):
     else:
         spu_html = '<b class="spu none">无 SPU</b>'
     img = ('<img src="%s" loading="lazy" decoding="async">' % esc(p["img"])) if p["img"] else '<span class="nopic">无图</span>'
-    link = ('<a href="%s" target="_blank" rel="noopener">站点</a>' % esc(p["url"])) if p["url"].startswith("http") else ""
-    l1688 = ('<a href="%s" target="_blank" rel="noopener">1688</a>' % esc(p["u1688"][0])) if p["u1688"] else ""
+    urls = [u for u in (p.get("urls") or ([p["url"]] if p.get("url") else [])) if u and u.startswith("http")]
+    inqs = [x for x in (p.get("inqs") or ([p["inq"]] if p.get("inq") else [])) if x]
+    if len(urls) > 1:
+        site_rows = "".join(
+            '<div class="l1688"><a href="%s" target="_blank" rel="noopener" class="siteurl">&#127761; %s</a></div>'
+            % (esc(u), esc(re.sub(r"^https?://(www\.)?", "", u)[:38])) for u in urls)
+        link = '<div class="links sitelist">%s</div>' % site_rows
+    else:
+        link = ('<a href="%s" target="_blank" rel="noopener">站点</a>' % esc(urls[0])) if urls else ""
+    l1688 = ('<a href="%s" target="_blank" rel="noopener">1688</a>' % esc((p.get("u1688") or [""])[0])) if (p.get("u1688") or []) else ""
+    if len(p["names"]) > 1:
+        names_html = "".join('<div class="nmrow">%s</div>' % esc(n[:100]) for n in p["names"])
+        title_html = '<div class="pn names">%s %s</div>' % (names_html, cnb)
+    else:
+        title_html = '<div class="pn" title="%s">%s%s %s</div>' % (
+            esc(" ／ ".join(p["names"])), esc(name[:90]),
+            ('<i>+%d</i>' % extra) if extra > 0 else "", cnb)
     return (
         '<div class="pc" data-n="%s" data-s="%s" data-i="%s" data-m="%s" data-p="%s" data-q="%s" data-cn="%s" data-row="%s">'
         '<div class="pi">%s</div><div class="pb">'
-        '<div class="pn" title="%s">%s%s %s</div>'
+        '%s'
         '<div class="ps">%s</div>'
         '<div class="pf"><span class="iq">%s</span></div>'
         '<div class="spuedit"><input class="libspu" data-inq="%s" data-row="%s" value="%s" placeholder="多个 SPU 用逗号分隔">'
@@ -875,15 +905,14 @@ def product_card(p, i=0):
         '<button class="libadd" onclick="addLibSpu(this)" title="在已有 SPU 后追加">+</button></div>'
         '<div class="pl">%s %s'
         '<button class="simbtn" onclick="sim(%d,\'lib\')">相似款</button></div></div></div>' % (
-            esc(name.lower() + " " + cn), esc(p["spu"].lower()), esc(p["inq"].lower()),
+            esc(name.lower() + " " + cn), esc(p["spu"].lower()), esc((inqs[0] if inqs else "").lower()),
             "1" if p.get("multi_spu") else "0",
             "0" if p["spu"] else "1",
-            "1" if not p["inq"] else "0",
+            "1" if not inqs else "0",
             esc(cn), esc(str(p.get("row") or "")),
-            img, esc(" ／ ".join(p["names"])), esc(name[:90]),
-            ('<i>+%d</i>' % extra) if extra > 0 else "", cnb,
-            spu_html, esc(p["inq"][-14:] if p["inq"] else "—"),
-            esc(p["inq"]), esc(str(p.get("row") or "")), esc(p["spu"]),
+            img, title_html,
+            spu_html, esc("、".join(x[-6:] for x in inqs) if inqs else "—"),
+            esc(inqs[0] if inqs else ""), esc(str(p.get("row") or "")), esc(p["spu"]),
             link, l1688, i))
 
 
@@ -1010,6 +1039,42 @@ def page_login(err=""):
 CURRENT_USER = {"name": ""}
 
 
+def merge_by_spu(prods):
+    """相同 SPU 的产品合并为一条展示记录（一个货号多站点多名称）。"""
+    groups, order = {}, []
+    for p in prods:
+        spus = [s for s in (p.get("spus") or ([p["spu"]] if p.get("spu") else [])) if s]
+        key = spus[0] if len(spus) == 1 else None
+        k = ("SPU", key) if key else ("ROW", id(p))
+        if k not in groups:
+            groups[k] = dict(p)
+            groups[k]["names"] = list(p.get("names") or [])
+            groups[k]["urls"] = [(p.get("url") or "")]
+            groups[k]["inqs"] = [p.get("inq") or ""]
+            groups[k]["u1688"] = list(p.get("u1688") or [])
+            groups[k]["_members"] = [p]
+            order.append(k)
+            continue
+        g = groups[k]
+        for n in (p.get("names") or []):
+            if n and n not in g["names"]:
+                g["names"].append(n)
+        u = p.get("url") or ""
+        if u and u not in g["urls"]:
+            g["urls"].append(u)
+        iq = p.get("inq") or ""
+        if iq and iq not in g["inqs"]:
+            g["inqs"].append(iq)
+        for x in (p.get("u1688") or []):
+            if x and x not in g["u1688"]:
+                g["u1688"].append(x)
+        if not g.get("img") and p.get("img"):
+            g["img"] = p["img"]
+        g["_members"].append(p)
+    out = [groups[k] for k in order]
+    return out
+
+
 def page_index():
     d = load_data()
     prods = d.get("products", [])
@@ -1018,7 +1083,7 @@ def page_index():
     n_multi = sum(1 for p in prods if p.get("multi_spu"))
     n_noiq = sum(1 for p in prods if not p["inq"])
 
-    cards = "".join(product_card(p, i) for i, p in enumerate(prods))
+    cards = "".join(product_card(p, i) for i, p in enumerate(merge_by_spu(prods)))
     pcards = "".join(pair_card(i, p) for i, p in enumerate(pairs))
     no_pairs = '<div class="empty">还没有配对数据<br><span>请在 ① 上传今日订单文件</span></div>' if not pairs else ""
 
@@ -1162,6 +1227,11 @@ main{max-width:1560px;margin:0 auto;padding:16px 22px 60px}
 .libadd{padding:3px 7px;border-radius:5px;border:1px solid #fcd34d;background:#fffbeb;
  color:#b45309;font-size:11px;font-weight:700;cursor:pointer;line-height:1}
 .libadd:hover{background:#fef3c7}
+.pn.names{font-size:10.5px;line-height:1.45;max-height:88px;overflow:auto}
+.nmrow{padding:1px 0;border-bottom:1px dashed #f1f5f9}
+.nmrow:last-child{border-bottom:none}
+.sitelist{margin-top:3px}
+.sitelist .l1688{margin-top:2px}
 .savebtn:hover{background:#ffedd5}
 .links{margin:4px 0 6px}
 .l1688{display:flex;gap:4px;margin-top:3px;align-items:center}
@@ -2071,18 +2141,37 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(200, json.dumps(
                         {"ok": False, "msg": "产品库里没找到这条记录"}, ensure_ascii=False))
                     return
-                target["spu"] = spu_txt
-                target["spus"] = spus
-                target["multi_spu"] = len(spus) > 1
+                # 合并组：同询盘号 / 同旧SPU 的所有产品一起更新（一个货号多站点）
+                old_spus = [s for s in (target.get("spus") or []) if s]
+                siblings = []
+                for p in d.get("products", []):
+                    if p is target:
+                        siblings.append(p)
+                        continue
+                    same_inq = inq and p.get("inq") == inq
+                    same_spu = old_spus and (set(p.get("spus") or []) & set(old_spus))
+                    same_url = (p.get("url") or "") and (p.get("url") == target.get("url"))
+                    if same_inq or same_spu or same_url:
+                        siblings.append(p)
+                for p in siblings:
+                    p["spu"] = spu_txt
+                    p["spus"] = spus
+                    p["multi_spu"] = len(spus) > 1
                 if sb.enabled():
                     try:
-                        match = {"inq": inq} if inq else {"url_key": sb.norm_url(target.get("url") or "")}
-                        sb.update("products", match, {"spu": spu_txt or None, "spus": spus})
-                        sb.put_spu_names([{"spu": s, "name": n, "url": target.get("url") or "",
-                                           "inq": inq} for s in spus for n in (target.get("names") or [])])
+                        for p in siblings:
+                            match = ({"inq": p["inq"]} if p.get("inq")
+                                     else {"url_key": sb.norm_url(p.get("url") or "")})
+                            sb.update("products", match, {"spu": spu_txt or None, "spus": spus})
+                        sb.put_spu_names([{"spu": s, "name": n,
+                                           "url": p.get("url") or "",
+                                           "inq": p.get("inq") or ""}
+                                          for p in siblings for s in spus
+                                          for n in (p.get("names") or [])])
                         sb.log_edit(user, "products", inq or target.get("url"),
                                     "", spu_txt,
-                                    (target.get("names") or [""])[0][:80])
+                                    "%s（合并 %d 条）" % (
+                                        (target.get("names") or [""])[0][:60], len(siblings)))
                     except Exception as e:
                         self._send(200, json.dumps(
                             {"ok": False, "msg": "云端写入失败：%s" % str(e)[:120]},
@@ -2091,7 +2180,8 @@ class Handler(BaseHTTPRequestHandler):
                 save_data(d)
                 invalidate_cache()
                 self._send(200, json.dumps(
-                    {"ok": True, "spu": spu_txt, "count": len(spus)},
+                    {"ok": True, "spu": spu_txt, "count": len(spus),
+                     "merged": len(siblings)},
                     ensure_ascii=False))
                 return
 

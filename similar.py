@@ -925,6 +925,41 @@ def cat_overlap(a_names, b_names):
     return ca & cb, ca, cb
 
 
+def find_same_by_image(target_img_url, pool, exclude_url=None):
+    """按图片判定库内同款（跨站点、不同语言标题的场景）。
+    严格三重条件——宁可漏判，也绝不误带 SPU：
+      1) 精细图距 fine <= 320
+      2) 色相相似 hue >= 0.80（真同款基本 >0.95，纯白底图乱配通常 <0.6）
+      3) 双方都是纯白底图时，还要求亮度/结构也足够接近
+    返回 (候选dict, 距离信息) 或 (None, None)。"""
+    tsig, _ = sig_for_url(target_img_url)
+    if not tsig:
+        return None, None
+    thue = _hue_of(tsig)
+    twhite = _white_of(tsig)
+    tu = norm(exclude_url or "")
+    best_x, best_df, best_info = None, 99999, None
+    for x in pool:
+        if tu and norm(x.get("url")) == tu:
+            continue
+        xsig, _ = sig_for_url(x.get("img"))
+        if not xsig:
+            continue
+        df = fine_dist(tsig, xsig)
+        if df >= best_df or df > 320:
+            continue
+        hc = cosv(thue, _hue_of(xsig))
+        if hc < 0.80:
+            continue
+        d, ds = hdist(tsig, xsig), sdist(tsig, xsig)
+        xwhite = _white_of(xsig)
+        if twhite > 0.60 and xwhite > 0.60 and d > 90 and ds > 90:
+            continue
+        best_x, best_df = x, df
+        best_info = {"fine": df, "hue": round(hc, 3), "h": d, "s": ds}
+    return best_x, best_info
+
+
 def find_similar(target_names, target_img_url, pool, topn=3, min_score=0.50,
                  exclude_inq=None, exclude_rows=None, exclude_spu=None, t_url=None):
     """
