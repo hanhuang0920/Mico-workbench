@@ -11,7 +11,7 @@ import threading
 import time
 import urllib.request
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.parse import parse_qs, quote, unquote
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 import openpyxl
 from openpyxl.drawing.image import Image as XLImage
@@ -899,6 +899,47 @@ def esc(s):
     return html.escape(str(s))
 
 
+# ---------- 三级分类（平台字典） ----------
+_CAT_TREE = None
+
+
+def cat_tree():
+    global _CAT_TREE
+    if _CAT_TREE is None:
+        fp = os.path.join(BASE, "cat_tree.json")
+        try:
+            with open(fp, encoding="utf-8") as f:
+                _CAT_TREE = json.load(f)
+        except Exception as e:
+            print("[分类字典加载失败] %s" % e)
+            _CAT_TREE = {}
+    return _CAT_TREE
+
+
+def _opts(values, cur):
+    out = []
+    for v in values:
+        out.append('<option value="%s"%s>%s</option>'
+                   % (esc(v), ' selected' if v == cur else '', esc(v)))
+    return "".join(out)
+
+
+def cat_opts_l1(cur=""):
+    return _opts(sorted(cat_tree().keys()), cur)
+
+
+def cat_opts_l2(l1, cur=""):
+    if not l1:
+        return ""
+    return _opts(sorted((cat_tree().get(l1) or {}).keys()), cur)
+
+
+def cat_opts_l3(l1, l2, cur=""):
+    if not l1 or not l2:
+        return ""
+    return _opts(sorted(((cat_tree().get(l1) or {}).get(l2) or [])), cur)
+
+
 def cn_badge(cn):
     """中文品名徽章：点击后切到产品库并按该品名筛选。"""
     if not cn:
@@ -1046,9 +1087,12 @@ def news_card(p, i=0):
         '<div class="pi">%s</div><div class="pb">'
         '%s'
         '<div class="cat3">'
-        '<input class="ci" data-idx="%d" data-k="l1" placeholder="一级" value="%s">'
-        '<input class="ci" data-idx="%d" data-k="l2" placeholder="二级" value="%s">'
-        '<input class="ci" data-idx="%d" data-k="l3" placeholder="三级" value="%s">'
+        '<select class="ci" data-idx="%d" data-k="l1" onchange="catL1(this)">'
+        '<option value="">一级分类</option>%s</select>'
+        '<select class="ci" data-idx="%d" data-k="l2" onchange="catL2(this)">'
+        '<option value="">二级分类</option>%s</select>'
+        '<select class="ci" data-idx="%d" data-k="l3">'
+        '<option value="">三级分类</option>%s</select>'
         '</div>'
         '<div class="inputrow"><label>SPU</label>'
         '<input class="spn%s" data-idx="%d" data-idxs="%s" value="%s" placeholder="多个用逗号分隔">'
@@ -1058,7 +1102,9 @@ def news_card(p, i=0):
         '<button class="simbtn savebtn" onclick="saveNewsSpu(%d)">保存SPU</button></div>'
         '</div></div>' % (
             i, esc(idx_attr), i, checked, img, title_html,
-            i, esc(p.get("l1", "")), i, esc(p.get("l2", "")), i, esc(p.get("l3", "")),
+            i, cat_opts_l1(p.get("l1", "")),
+            i, cat_opts_l2(p.get("l1", ""), p.get("l2", "")),
+            i, cat_opts_l3(p.get("l1", ""), p.get("l2", ""), p.get("l3", "")),
             " filled" if spu_v else "", i, esc(idx_attr), esc(spu_v), i,
             site_html,
             " done" if p.get("mark") == "same" else "", i, i))
@@ -1295,7 +1341,8 @@ main{max-width:1560px;margin:0 auto;padding:16px 22px 60px}
 .chk input{width:15px;height:15px;cursor:pointer;accent-color:#4f46e5}
 .cat3{display:flex;flex-direction:column;gap:3px;margin-top:3px}
 .ci{padding:4px 7px;border:1px solid #e2e8f0;border-radius:5px;font-size:11px;
- outline:none;font-family:inherit;width:100%}
+ outline:none;font-family:inherit;width:100%;background:#fff;cursor:pointer}
+select.ci{appearance:auto}
 .ci:focus{border-color:#4f46e5;background:#fafaff}
 .ci.ok{border-color:#10b981;background:#f0fdf4}
 .simbtn{padding:4px 10px;border-radius:6px;border:1px solid #c7d2fe;background:#eef2ff;
@@ -1865,7 +1912,7 @@ function collectDemand(){
     var cb=c.querySelector('input[type=checkbox]');
     var l1=c.querySelector('.ci[data-k=l1]');
     var l2=c.querySelector('.ci[data-k=l2]');
-    var l3=c.querySelector('input[data-k=l3]');
+    var l3=c.querySelector('.ci[data-k=l3]');
     arr.push({idx:idx, checked:cb?cb.checked:true,
       l1:l1?l1.value.trim():'', l2:l2?l2.value.trim():'', l3:l3?l3.value.trim():''});
   });
@@ -1900,6 +1947,36 @@ function exportDemand(){
   }).catch(function(e){toast('出错：'+e)});
 }
 var SIMKIND='pair', SIMIDX=-1;
+function catL1(sel){
+  var card=sel.closest('.cat3');
+  var l2=card.querySelector('[data-k=l2]');
+  var l3=card.querySelector('[data-k=l3]');
+  l3.innerHTML='<option value="">三级分类</option>';
+  if(!sel.value){l2.innerHTML='<option value="">二级分类</option>';return}
+  fetch('/api/cat-l2?l1='+encodeURIComponent(sel.value))
+    .then(function(r){return r.json()}).then(function(d){
+      var h='<option value="">二级分类</option>';
+      (d.items||[]).forEach(function(v){
+        h+='<option value="'+esc2(v)+'">'+esc2(v)+'</option>';
+      });
+      l2.innerHTML=h;
+    });
+}
+function catL2(sel){
+  var card=sel.closest('.cat3');
+  var l1=card.querySelector('[data-k=l1]');
+  var l3=card.querySelector('[data-k=l3]');
+  l3.innerHTML='<option value="">三级分类</option>';
+  if(!sel.value||!l1.value)return;
+  fetch('/api/cat-l3?l1='+encodeURIComponent(l1.value)+'&l2='+encodeURIComponent(sel.value))
+    .then(function(r){return r.json()}).then(function(d){
+      var h='<option value="">三级分类</option>';
+      (d.items||[]).forEach(function(v){
+        h+='<option value="'+esc2(v)+'">'+esc2(v)+'</option>';
+      });
+      l3.innerHTML=h;
+    });
+}
 function closeModal(){document.getElementById('modal').classList.remove('on')}
 function esc2(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 function spuHtml(c){
@@ -2091,6 +2168,17 @@ class Handler(BaseHTTPRequestHandler):
                         "url": r.get("url"), "inq": r.get("inq")} for r in rows]
                 self._send(200, json.dumps({"ok": True, "spu": spu, "items": out},
                                            ensure_ascii=False))
+            elif self.path.startswith("/api/cat-l2"):
+                q = parse_qs(urlparse(self.path).query)
+                l1 = (q.get("l1") or [""])[0]
+                items = sorted((cat_tree().get(l1) or {}).keys())
+                self._send(200, json.dumps({"items": items}, ensure_ascii=False))
+            elif self.path.startswith("/api/cat-l3"):
+                q = parse_qs(urlparse(self.path).query)
+                l1 = (q.get("l1") or [""])[0]
+                l2 = (q.get("l2") or [""])[0]
+                items = sorted(((cat_tree().get(l1) or {}).get(l2) or []))
+                self._send(200, json.dumps({"items": items}, ensure_ascii=False))
             else:
                 self._send(404, json.dumps({"ok": False}, ensure_ascii=False))
         except Exception as e:
