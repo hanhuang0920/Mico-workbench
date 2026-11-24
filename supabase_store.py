@@ -202,6 +202,15 @@ def clear_pairs(date_str):
     delete("pairs", {"work_date": date_str})
 
 
+def clear_all_pairs():
+    """清空所有日期的配对（导入新订单时用，以本次订单为准）。"""
+    _req("DELETE", "pairs", params={"id": "gte.0"})
+
+
+def clear_all_news():
+    _req("DELETE", "news", params={"id": "gte.0"})
+
+
 def save_pairs(date_str, items):
     """保存配对。items 可能来自多个日期（页面上不再按日期过滤），
     所以每条优先用自己的 date 字段，避免把旧记录都改成今天。"""

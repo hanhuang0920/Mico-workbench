@@ -284,13 +284,9 @@ def process_order(path):
                 "dist": dist,
             })
 
-        # 库里有询盘记录、但没有 SPU → 按“尚无 SPU”处理，进未询盘
-        hit_spu = (hit.get("spu") or "").strip() if hit else ""
-        if hit and not hit_spu:
-            hit = None
-
+        # 库里有询盘记录就进配对（有没有 SPU 都显示，方便用相似款比对比出 SPU）
         if not hit:
-            # ★ 规则3：无询盘记录 / 无 SPU → 未询盘新品
+            # ★ 规则3：无询盘记录 → 未询盘新品
             not_inq += 1
             prev = news_map.get(k) or {}
             if prev:
@@ -309,7 +305,7 @@ def process_order(path):
             })
             continue
 
-        # ★ 规则2：库里已有询盘记录且已有 SPU → 待采集配对
+        # ★ 规则2：库里已有询盘记录 → 待采集配对（SPU 可能为空，靠人工/相似款补齐）
         prev = pairs_map.get(hit["inq"]) or pairs_map.get(k) or {}
         merged_names = hit["names"] + [n for n in p["names"] if n not in hit["names"]]
         iq = hit["inq"] or ""
@@ -360,7 +356,7 @@ def process_order(path):
             "mark": prev.get("mark"), "note": prev.get("note") or "",
         })
 
-    # ★ 规则4：以最新导入的订单文件为准，旧记录不再保留
+    # ★ 规则4：以最新导入的订单文件为准，旧记录全部清除
     pairs = pairs_out
     pairs.sort(key=lambda x: (0 if x.get("spu") else 1, x.get("inq") or ""))
     news = news_out
@@ -369,7 +365,10 @@ def process_order(path):
     d["pairs_date"] = today
     if sb.enabled():
         try:
+            # 先清空所有历史日期，再写入本次订单（否则旧日期的记录会残留）
+            sb.clear_all_pairs()
             sb.save_pairs(today, pairs)
+            sb.clear_all_news()
             sb.save_news(today, news)
             invalidate_cache()
         except Exception as e:
