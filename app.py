@@ -250,11 +250,16 @@ def process_order(path):
     pairs_out, news_out = [], []
     img_auto = []          # 靠图片/规格自动认出是库内同款的（跨站点不同语言标题）
     for k, p in prods.items():
+        # ★ 规则1：订单里已经有 SKU 的，两处都不显示（已处理完毕）
+        if p.get("skus"):
+            with_sku += 1
+            continue
+
+        # ★ 规则2：无 SKU 的产品，先去产品库匹配（询盘记录 / 已有 SPU 都算命中）
         hit = lib_hit(k, p)
         how = "url/title" if hit else ""
         dist = None
         if not hit:
-            # 通道1：图片极像
             if p.get("img"):
                 try:
                     hit, dist = similar.find_same_by_image(p["img"], libs)
@@ -262,7 +267,6 @@ def process_order(path):
                     hit, dist = None, None
                 if hit is not None:
                     how = "image"
-            # 通道2：标题规格参数一致（同款不同配色，图片差异大）
             if not hit:
                 try:
                     hit2, info2 = similar.find_same_by_title_spec(
@@ -279,8 +283,14 @@ def process_order(path):
                 "how": how,
                 "dist": dist,
             })
+
+        # 库里有询盘记录、但没有 SPU → 按“尚无 SPU”处理，进未询盘
+        hit_spu = (hit.get("spu") or "").strip() if hit else ""
+        if hit and not hit_spu:
+            hit = None
+
         if not hit:
-            # ---- 未询盘 → 新品（只在本次订单内）----
+            # ★ 规则3：无询盘记录 / 无 SPU → 未询盘新品
             not_inq += 1
             prev = news_map.get(k) or {}
             if prev:
@@ -291,17 +301,15 @@ def process_order(path):
                 "url": p["url"], "name": (p["names"] or [""])[0],
                 "names": p["names"] or prev.get("names") or [],
                 "img": p["img"] or prev.get("img") or "",
-                "skus": p["skus"] or prev.get("skus") or [],
+                "skus": prev.get("skus") or [],
                 "l1": prev.get("l1", "") or "", "l2": prev.get("l2", "") or "",
                 "l3": prev.get("l3", "") or "",
                 "filled_spu": prev.get("filled_spu", "") or "",
                 "mark": prev.get("mark"), "checked": prev.get("checked", True),
             })
             continue
-        if p["skus"]:
-            with_sku += 1
-            continue
-        # ---- 已询盘无 SKU → 待采集配对（只在本次订单内）----
+
+        # ★ 规则2：库里已有询盘记录且已有 SPU → 待采集配对
         prev = pairs_map.get(hit["inq"]) or pairs_map.get(k) or {}
         merged_names = hit["names"] + [n for n in p["names"] if n not in hit["names"]]
         iq = hit["inq"] or ""
@@ -352,17 +360,7 @@ def process_order(path):
             "mark": prev.get("mark"), "note": prev.get("note") or "",
         })
 
-    # 已填过 SPU 的配对（人工处理过的成果）即使不在本次订单里也保留，避免白干
-    in_order_urls = {norm(x.get("url")) for x in pairs_out if x.get("url")}
-    in_order_inq = {x.get("inq") for x in pairs_out if x.get("inq")}
-    for op in d.get("pairs", []):
-        if not (op.get("filled_spu") or "").strip():
-            continue
-        u = norm(op.get("url"))
-        if (u and u in in_order_urls) or (op.get("inq") and op.get("inq") in in_order_inq):
-            continue
-        pairs_out.append(op)
-
+    # ★ 规则4：以最新导入的订单文件为准，旧记录不再保留
     pairs = pairs_out
     pairs.sort(key=lambda x: (0 if x.get("spu") else 1, x.get("inq") or ""))
     news = news_out
@@ -1042,6 +1040,7 @@ def pair_card(p, i=0):
     inq_txt = "、".join(x[-6:] for x in inqs) if inqs else "—"
     idxs = p.get("_idx") or [i]
     idx_attr = ",".join(str(x) for x in idxs)
+    first_idx = idxs[0]      # 供前端定位输入框；与 data-idxs 同源，避免合并后错位
     return (
         '<div class="paircard" data-inq="%s" data-url="%s" data-cn="%s" data-idxs="%s"><div class="pi">%s</div><div class="pb">'
         '%s %s'
@@ -1060,8 +1059,8 @@ def pair_card(p, i=0):
             img, title_html, cnb,
             esc(inq_txt),
             ('<i class="tag">合并%d</i>' % len(idxs)) if len(idxs) > 1 else "",
-            l1688, i, esc(idx_attr), esc(cur), i, i,
-            " done" if p.get("mark") == "same" else "", i, i))
+            l1688, first_idx, esc(idx_attr), esc(cur), first_idx, first_idx,
+            " done" if p.get("mark") == "same" else "", first_idx, first_idx))
 
 
 def news_card(p, i=0):
@@ -1087,6 +1086,7 @@ def news_card(p, i=0):
         site_html = '<a href="%s" target="_blank" rel="noopener">站点</a>' % (esc(urls[0]) if urls else "")
     idxs = p.get("_idx") or [i]
     idx_attr = ",".join(str(x) for x in idxs)
+    first_idx = idxs[0]      # 与 data-idxs 同源，避免合并后索引错位
     return (
         '<div class="newscard" data-idx="%d" data-idxs="%s">'
         '<label class="chk"><input type="checkbox" data-idx="%d" %s></label>'
@@ -1107,13 +1107,13 @@ def news_card(p, i=0):
         '<button class="simbtn%s" onclick="sim(%d,\'news\')">相似款</button>'
         '<button class="simbtn savebtn" onclick="saveNewsSpu(%d)">保存SPU</button></div>'
         '</div></div>' % (
-            i, esc(idx_attr), i, checked, img, title_html,
-            i, cat_opts_l1(p.get("l1", "")),
-            i, cat_opts_l2(p.get("l1", ""), p.get("l2", "")),
-            i, cat_opts_l3(p.get("l1", ""), p.get("l2", ""), p.get("l3", "")),
-            " filled" if spu_v else "", i, esc(idx_attr), esc(spu_v), i,
+            first_idx, esc(idx_attr), first_idx, checked, img, title_html,
+            first_idx, cat_opts_l1(p.get("l1", "")),
+            first_idx, cat_opts_l2(p.get("l1", ""), p.get("l2", "")),
+            first_idx, cat_opts_l3(p.get("l1", ""), p.get("l2", ""), p.get("l3", "")),
+            " filled" if spu_v else "", first_idx, esc(idx_attr), esc(spu_v), first_idx,
             site_html,
-            " done" if p.get("mark") == "same" else "", i, i))
+            " done" if p.get("mark") == "same" else "", first_idx, first_idx))
 
 
 LOGIN_TPL = """<!DOCTYPE html>
