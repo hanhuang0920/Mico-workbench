@@ -626,13 +626,16 @@ def export_demand():
                  "F": 16, "G": 22, "I": 76, "M": 10}.items():
         ws.column_dimensions[c].width = w
 
-    out = os.path.join(BASE, "Mico杂货铺询盘需求表_%s.xlsx"
-                       % datetime.datetime.now().strftime("%Y%m%d_%H%M"))
+    # 文件名以当前客户开头，避免两个客户的导出文件混淆
+    cust = sb.current_customer()
+    out = os.path.join(BASE, "%s询盘需求表_%s.xlsx"
+                       % (cust, datetime.datetime.now().strftime("%Y%m%d_%H%M")))
     try:
         wb.save(out)
     except Exception as e:
         return {"ok": False, "msg": str(e)}
-    return {"ok": True, "file": os.path.basename(out), "count": len(news)}
+    return {"ok": True, "file": os.path.basename(out), "count": len(news),
+            "customer": cust}
 
 
 def export_pairs():
