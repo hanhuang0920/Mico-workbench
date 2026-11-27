@@ -10,12 +10,38 @@ import os
 import re
 import json
 import time
+import contextvars
 import urllib.request
 import urllib.parse
 import urllib.error
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SUPABASE_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
+
+# ---------- 多客户隔离 ----------
+# 请求进入时用 set_customer() 设定当前客户，本模块所有读写自动带上该客户过滤。
+CUSTOMERS = [c.strip() for c in
+             os.environ.get("CUSTOMERS", "Mico,Stijn").split(",") if c.strip()]
+_DEFAULT_CUSTOMER = CUSTOMERS[0] if CUSTOMERS else "Mico"
+_customer_var = contextvars.ContextVar("customer", default=_DEFAULT_CUSTOMER)
+
+
+def set_customer(name):
+    """设定当前请求的客户（每个请求开始时调用）。"""
+    if name and name in CUSTOMERS:
+        _customer_var.set(name)
+    else:
+        _customer_var.set(_DEFAULT_CUSTOMER)
+    return _customer_var.get()
+
+
+def current_customer():
+    return _customer_var.get()
+
+
+def _cust():
+    """所有按客户隔离的表都用这个值过滤。"""
+    return _customer_var.get()
 
 
 def enabled():
@@ -66,14 +92,29 @@ def _req(method, path, body=None, params=None, prefer=None, retries=3):
 
 
 # ---------- 通用 ----------
+# 需要按客户隔离的表（其余表如 edit_log/op_log 保持全局）
+_SCOPED_TABLES = {"products", "pairs", "news", "img_sigs"}
+
+
+def _scoped(table):
+    return table in _SCOPED_TABLES
+
+
 def select(table, params=None):
-    return _req("GET", table, params=params) or []
+    p = dict(params or {})
+    if _scoped(table) and "customer" not in p:
+        p["customer"] = "eq.%s" % _cust()
+    return _req("GET", table, params=p) or []
 
 
 def insert(table, rows, upsert_on=None):
-    """批量插入，rows 为 list。upsert_on 指定冲突列（如 url_key）实现 upsert。"""
+    """批量插入，rows 为 list。upsert_on 指定冲突列（如 customer,url_key）实现 upsert。"""
     if not rows:
         return None
+    if _scoped(table):
+        cust = _cust()
+        for r in rows:
+            r.setdefault("customer", cust)
     params = {"on_conflict": upsert_on} if upsert_on else None
     prefer = "resolution=merge-duplicates,return=representation" if upsert_on else "return=representation"
     return _req("POST", table, body=rows, params=params, prefer=prefer)
@@ -84,6 +125,8 @@ def update(table, match, patch):
     params = {}
     for k, v in match.items():
         params[k] = "eq.%s" % v
+    if _scoped(table):
+        params["customer"] = "eq.%s" % _cust()
     return _req("PATCH", table, body=patch, params=params,
                 prefer="return=representation")
 
@@ -92,7 +135,14 @@ def delete(table, match):
     params = {}
     for k, v in match.items():
         params[k] = "eq.%s" % v
+    if _scoped(table):
+        params["customer"] = "eq.%s" % _cust()
     return _req("DELETE", table, params=params)
+
+
+def _req_raw(method, table, params):
+    """DELETE 用（支持 gte 等操作符，不走 eq 转换）。"""
+    return _req(method, table, params=params)
 
 
 def count(table, params=None):
@@ -169,11 +219,14 @@ def upsert_products(items):
         })
     # 分批，避免单次请求过大
     for i in range(0, len(rows), 200):
+        chunk = rows[i:i + 200]
         try:
-            insert("products", rows[i:i + 200], upsert_on="url_key,inq")
+            insert("products", chunk, upsert_on="customer,url_key,inq")
         except Exception:
-            # 老库还没换成 (url_key,inq) 唯一索引时，退回按 url_key 合并
-            insert("products", rows[i:i + 200], upsert_on="url_key")
+            try:
+                insert("products", chunk, upsert_on="customer,url_key")
+            except Exception:
+                insert("products", chunk, upsert_on="url_key")
     return len(rows)
 
 
@@ -203,12 +256,12 @@ def clear_pairs(date_str):
 
 
 def clear_all_pairs():
-    """清空所有日期的配对（导入新订单时用，以本次订单为准）。"""
-    _req("DELETE", "pairs", params={"id": "gte.0"})
+    """清空当前客户的配对（导入新订单时用，以本次订单为准）。"""
+    _req("DELETE", "pairs", params={"id": "gte.0", "customer": "eq.%s" % _cust()})
 
 
 def clear_all_news():
-    _req("DELETE", "news", params={"id": "gte.0"})
+    _req("DELETE", "news", params={"id": "gte.0", "customer": "eq.%s" % _cust()})
 
 
 def save_pairs(date_str, items):
@@ -437,7 +490,9 @@ def put_img_sig(url_key, sig_list):
     if not _SIG_WRITE_OK:
         return
     try:
-        insert("img_sigs", [{"url_key": url_key, "sig": sig_list}], upsert_on="url_key")
+        insert("img_sigs", [{"url_key": url_key, "sig": sig_list,
+                             "customer": _cust()}],
+               upsert_on="customer,url_key")
     except Exception as e:
         # 表不存在/权限问题时熔断，避免每张图都白白请求一次
         _SIG_WRITE_OK = False
@@ -446,9 +501,13 @@ def put_img_sig(url_key, sig_list):
 
 def put_img_sigs_bulk(pairs_):
     """批量写入 [(url_key, sig_list)]，分批 200。返回写入数。"""
-    rows = [{"url_key": k, "sig": v} for k, v in pairs_ if k and v]
+    cust = _cust()
+    rows = [{"url_key": k, "sig": v, "customer": cust} for k, v in pairs_ if k and v]
     n = 0
     for i in range(0, len(rows), 200):
-        insert("img_sigs", rows[i:i + 200], upsert_on="url_key")
+        try:
+            insert("img_sigs", rows[i:i + 200], upsert_on="customer,url_key")
+        except Exception:
+            insert("img_sigs", rows[i:i + 200], upsert_on="url_key")
         n += len(rows[i:i + 200])
     return n

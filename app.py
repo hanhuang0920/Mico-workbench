@@ -54,21 +54,23 @@ def norm(u):
 
 
 # ================= 数据层 =================
-_mem_cache = {"data": None, "ts": 0.0}
+# 缓存按客户分开存，避免 Mico 看到 Stijn 的数据
+_mem_cache = {}
 _CACHE_TTL = 8.0     # 秒，多人协作时兼顾实时性与性能
 
 
 def invalidate_cache():
-    _mem_cache["data"] = None
-    _mem_cache["ts"] = 0.0
+    _mem_cache.clear()
 
 
 def load_data():
-    """优先从 Supabase 读（带 8 秒内存缓存），失败或未配置则读本地 JSON。"""
+    """优先从 Supabase 读（按客户+8秒缓存），失败或未配置则读本地 JSON。"""
+    cust = sb.current_customer()
     if sb.enabled():
         now = time.time()
-        if _mem_cache["data"] is not None and (now - _mem_cache["ts"]) < _CACHE_TTL:
-            return _mem_cache["data"]
+        ent = _mem_cache.get(cust)
+        if ent and ent.get("data") is not None and (now - ent["ts"]) < _CACHE_TTL:
+            return ent["data"]
         try:
             prods = sb.get_products()
             today = datetime.date.today().isoformat()
@@ -79,14 +81,17 @@ def load_data():
                 news = sb.get_news()
             data = {"products": prods, "pairs": pairs, "news": news,
                     "pairs_date": today, "updated": "Supabase", "source": "supabase"}
-            _mem_cache["data"] = data
-            _mem_cache["ts"] = now
+            _mem_cache[cust] = {"data": data, "ts": now}
             return data
         except Exception as e:
             print("[Supabase读取失败，降级本地] %s" % e)
-    if os.path.exists(DATA_FILE):
+    # 本地缓存文件也按客户分开
+    fp = DATA_FILE
+    if cust != DEFAULT_CUSTOMER:
+        fp = DATA_FILE.replace(".json", "_%s.json" % cust)
+    if os.path.exists(fp):
         try:
-            return json.load(open(DATA_FILE, encoding="utf-8"))
+            return json.load(open(fp, encoding="utf-8"))
         except Exception:
             pass
     return {"products": [], "pairs": [], "news": [], "updated": ""}
@@ -96,19 +101,23 @@ _save_lock = threading.Lock()
 
 
 def save_data(d):
-    """写本地缓存（Supabase 由各业务函数单独写）。"""
+    """写本地缓存（Supabase 由各业务函数单独写）。按客户分开保存。"""
     d["updated"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cust = sb.current_customer()
+    fp = DATA_FILE
+    if cust != DEFAULT_CUSTOMER:
+        fp = DATA_FILE.replace(".json", "_%s.json" % cust)
     with _save_lock:
-        tmp = DATA_FILE + ".tmp"
+        tmp = fp + ".tmp"
         try:
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(d, f, ensure_ascii=False, indent=1)
             try:
-                os.replace(tmp, DATA_FILE)
+                os.replace(tmp, fp)
             except Exception:
                 time.sleep(0.15)
                 try:
-                    os.replace(tmp, DATA_FILE)
+                    os.replace(tmp, fp)
                 except Exception:
                     pass
         except Exception as e:
@@ -878,10 +887,20 @@ import base64
 import hashlib
 
 COOKIE_NAME = "mico_auth"
+CUSTOMER_COOKIE = "mico_customer"
+
+# 客户列表：登录时选择。现有数据全部归到第一个客户。
+CUSTOMERS = sb.CUSTOMERS
+DEFAULT_CUSTOMER = CUSTOMERS[0] if CUSTOMERS else "Mico"
 
 
 def make_token(user):
     raw = "%s|%s" % (user, APP_PASSWORD)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+def make_customer_token(cust):
+    raw = "%s|%s|%s" % (cust, APP_PASSWORD, COOKIE_NAME)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
 
@@ -1139,11 +1158,13 @@ button:hover{background:#4338ca}
  border-radius:8px;margin-bottom:14px;border:1px solid #fecaca}
 </style></head><body>
 <div class="box">
-  <h1>Mico 选品工作台</h1>
+  <h1>选品工作台</h1>
   <span class="user">{{USER}} <a href="/logout" class="logout">退出</a></span>
-  <div class="sub">请输入姓名和密码</div>
+  <div class="sub">请选择客户、姓名并输入密码</div>
   {{ERR}}
   <form method="POST" action="/login">
+    <label>客户</label>
+    <select name="cust">{{CUSTOMERS}}</select>
     <label>我是谁</label>
     <select name="user">{{USERS}}</select>
     <label>密码</label>
@@ -1156,11 +1177,14 @@ button:hover{background:#4338ca}
 
 def page_login(err=""):
     opts = "".join('<option value="%s">%s</option>' % (esc(u), esc(u)) for u in USERS)
+    copts = "".join('<option value="%s">%s</option>' % (esc(c), esc(c)) for c in CUSTOMERS)
     e = '<div class="err">%s</div>' % esc(err) if err else ""
-    return LOGIN_TPL.replace("{{USERS}}", opts).replace("{{ERR}}", e)
+    return (LOGIN_TPL.replace("{{USERS}}", opts)
+            .replace("{{CUSTOMERS}}", copts)
+            .replace("{{ERR}}", e))
 
 
-CURRENT_USER = {"name": ""}
+CURRENT_USER = {"name": "", "customer": ""}
 
 
 def merge_by_spu(prods, with_idx=False):
@@ -1232,6 +1256,7 @@ def page_index():
 
     return PAGE_TPL \
         .replace("{{USER}}", esc(CURRENT_USER.get("name", ""))) \
+        .replace("{{CUSTOMER}}", esc(CURRENT_USER.get("customer", sb.current_customer()))) \
         .replace("{{TOTAL}}", str(len(prod_groups))) \
         .replace("{{NSPU}}", str(n_spu)) \
         .replace("{{NMULTI}}", str(n_multi)) \
@@ -1259,6 +1284,7 @@ header{background:linear-gradient(135deg,#1e293b,#334155 60%,#475569);
 .hrow{max-width:1560px;margin:0 auto;display:flex;align-items:center;gap:20px;flex-wrap:wrap}
 header h1{font-size:17px;font-weight:700;white-space:nowrap}
 .user{font-size:12.5px;opacity:.8;white-space:nowrap}
+.cust{background:#4f46e5;padding:1px 9px;border-radius:5px;font-size:15px}
 .logout{color:#a5b4fc;text-decoration:none;margin-left:6px}
 .logout:hover{text-decoration:underline}
 .stats{display:flex;gap:18px;flex-wrap:wrap;margin-left:auto}
@@ -1438,8 +1464,8 @@ select.ci{appearance:auto}
 </style></head>
 <body>
 <header><div class="hrow">
-  <h1>Mico 选品工作台</h1>
-  <span class="user">{{USER}} <a href="/logout" class="logout">退出</a></span>
+  <h1><span class="cust">{{CUSTOMER}}</span> 选品工作台</h1>
+  <span class="user">{{USER}} <a href="/logout" class="logout">切换客户/退出</a></span>
   <div class="stats">
     <div class="st"><b>{{TOTAL}}</b><span>已询盘</span></div>
     <div class="st"><b>{{NSPU}}</b><span>有 SPU</span></div>
@@ -2140,6 +2166,16 @@ class Handler(BaseHTTPRequestHandler):
                 self._redirect("/login")
             return None
         CURRENT_USER["name"] = u
+        # 绑定当前请求的客户（此后所有数据读写自动按客户隔离）
+        ck = parse_cookie(self.headers.get("Cookie", ""))
+        cust = unquote(ck.get("cust", ""))
+        tok = ck.get(CUSTOMER_COOKIE, "")
+        if not cust or (APP_PASSWORD and tok != make_customer_token(cust)):
+            cust = DEFAULT_CUSTOMER
+        if cust not in CUSTOMERS:
+            cust = DEFAULT_CUSTOMER
+        sb.set_customer(cust)
+        CURRENT_USER["customer"] = cust
         return u
 
     # ---------- GET ----------
@@ -2151,7 +2187,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/logout":
                 self._redirect("/login", [("Set-Cookie",
                     "user=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"),
-                    ("Set-Cookie", "%s=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax" % COOKIE_NAME)])
+                    ("Set-Cookie", "%s=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax" % COOKIE_NAME),
+                    ("Set-Cookie", "cust=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"),
+                    ("Set-Cookie", "%s=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
+                     % CUSTOMER_COOKIE)])
                 return
 
             if not self._need_auth():
@@ -2201,17 +2240,29 @@ class Handler(BaseHTTPRequestHandler):
                 q = parse_qs(raw.decode("utf-8", "replace"))
                 u = (q.get("user") or [""])[0]
                 pw = (q.get("pwd") or [""])[0]
+                cust = (q.get("cust") or [""])[0]
                 if pw != APP_PASSWORD:
                     self._send(200, page_login("密码不正确"), "text/html; charset=utf-8")
                     return
                 if u not in USERS:
                     self._send(200, page_login("请选择你的姓名"), "text/html; charset=utf-8")
                     return
+                if cust not in CUSTOMERS:
+                    self._send(200, page_login("请选择客户"), "text/html; charset=utf-8")
+                    return
                 tok = make_token(u)
-                self._redirect("/", [("Set-Cookie",
-                    "user=%s; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax" % quote(u)),
+                ctok = make_customer_token(cust)
+                self._redirect("/", [
                     ("Set-Cookie",
-                     "%s=%s; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax" % (COOKIE_NAME, tok))])
+                     "user=%s; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax" % quote(u)),
+                    ("Set-Cookie",
+                     "%s=%s; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax" % (COOKIE_NAME, tok)),
+                    ("Set-Cookie",
+                     "cust=%s; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax" % quote(cust)),
+                    ("Set-Cookie",
+                     "%s=%s; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax"
+                     % (CUSTOMER_COOKIE, ctok)),
+                ])
                 return
 
             user = self._need_auth()

@@ -411,20 +411,30 @@ def img_sig(path):
 
 
 # ===== URL 级签名缓存（存 Supabase img_sigs 表，云端重启不用重新下载图片）=====
-_URL_SIGS = None
+# 按客户分开缓存，避免 A 客户用到 B 客户的签名
+_URL_SIGS = {}
 
 
 def _load_url_sigs():
-    global _URL_SIGS
-    if _URL_SIGS is None:
-        _URL_SIGS = {}
+    try:
+        import supabase_store as _sb
+        cust = _sb.current_customer() if hasattr(_sb, "current_customer") else "Mico"
+    except Exception:
+        return {}
+    if cust not in _URL_SIGS:
+        _URL_SIGS[cust] = {}
         try:
             import supabase_store as _sb
             if _sb.enabled():
-                _URL_SIGS = _sb.get_img_sigs()
+                _URL_SIGS[cust] = _sb.get_img_sigs()
         except Exception as e:
             print("[img_sigs 读取失败，退回在线下载] %s" % e)
-    return _URL_SIGS
+    return _URL_SIGS[cust]
+
+
+def clear_sig_cache():
+    """切换客户时清掉内存签名缓存。"""
+    _URL_SIGS.clear()
 
 
 def sig_for_url(url):
