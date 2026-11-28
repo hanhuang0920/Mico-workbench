@@ -258,6 +258,44 @@ def process_order(path):
     added_pairs = added_news = updated = not_inq = with_sku = 0
     pairs_out, news_out = [], []
     img_auto = []          # 靠图片/规格自动认出是库内同款的（跨站点不同语言标题）
+
+    # ---- 性能：并发预取图片签名，避免逐条串行下载（每条约 1 秒）----
+    def _prefetch():
+        try:
+            need = []
+            have = similar._load_url_sigs()
+            for k, p in prods.items():
+                if p.get("skus") or not p.get("img"):
+                    continue
+                if lib_hit(k, p):
+                    continue
+                u = similar.norm(p["img"])
+                if u and u not in have:
+                    need.append(p["img"])
+            # 产品库里的图也预热（新客户首单也要用）
+            for lp in libs:
+                if lp.get("img"):
+                    u = similar.norm(lp["img"])
+                    if u and u not in have:
+                        need.append(lp["img"])
+            if not need:
+                return
+            need = list(dict.fromkeys(need))[:120]
+            from concurrent.futures import ThreadPoolExecutor
+            def one(url):
+                try:
+                    similar.sig_for_url(url)
+                except Exception:
+                    pass
+            with ThreadPoolExecutor(max_workers=8) as ex:
+                list(ex.map(one, need))
+            print("[导入] 预取图片签名 %d 张" % len(need))
+        except Exception as e:
+            print("[导入] 预取失败（不影响结果）: %s" % str(e)[:100])
+
+    if sb.enabled():
+        _prefetch()
+
     for k, p in prods.items():
         # ★ 规则1：订单里已经有 SKU 的，两处都不显示（已处理完毕）
         if p.get("skus"):
@@ -1470,11 +1508,11 @@ select.ci{appearance:auto}
   <h1><span class="cust">{{CUSTOMER}}</span> 选品工作台</h1>
   <span class="user">{{USER}} <a href="/logout" class="logout">切换客户/退出</a></span>
   <div class="stats">
-    <div class="st"><b>{{TOTAL}}</b><span>已询盘</span></div>
-    <div class="st"><b>{{NSPU}}</b><span>有 SPU</span></div>
-    <div class="st"><b>{{NMULTI}}</b><span>多 SPU</span></div>
-    <div class="st"><b>{{NNOIQ}}</b><span>无询盘号</span></div>
-    <div class="st"><b>{{NPAIRS}}</b><span>待配对</span></div>
+    <div class="st"><b data-cnt="total">{{TOTAL}}</b><span>已询盘</span></div>
+    <div class="st"><b data-cnt="spu">{{NSPU}}</b><span>有 SPU</span></div>
+    <div class="st"><b data-cnt="multi">{{NMULTI}}</b><span>多 SPU</span></div>
+    <div class="st"><b data-cnt="noiq">{{NNOIQ}}</b><span>无询盘号</span></div>
+    <div class="st"><b data-cnt="pairs">{{NPAIRS}}</b><span>待配对</span></div>
   </div>
 </div></header>
 <main>
@@ -1672,6 +1710,7 @@ function up(file){
   if(!file)return;
   if(!/\.xlsx$/i.test(file.name)){toast('请上传 .xlsx 文件');return}
   var fd=new FormData(); fd.append('file',file);
+  var t0=Date.now();
   toast('正在处理 '+file.name+' …');
   fetch('/api/upload',{method:'POST',body:fd}).then(function(r){return r.json()})
   .then(function(d){
@@ -1683,9 +1722,30 @@ function up(file){
       '<div class="si"><b>'+d.pairs+'</b>待配对</div>'+
       '<div class="si"><b>'+d.not_inq+'</b>未询盘</div>';
     document.getElementById('sum').classList.add('show');
-    toast('已生成 '+d.pairs+' 款待配对');
-    setTimeout(function(){location.reload()},1100);
+    var sec=((Date.now()-t0)/1000).toFixed(1);
+    toast('完成（'+sec+'秒）：待配对 '+d.pairs+' 款，未询盘 '+d.not_inq+' 款');
+    // 局部刷新列表，避免整页重载（图片重新下载导致慢）
+    refreshLists();
   }).catch(function(e){toast('出错：'+e)});
+}
+function refreshLists(){
+  fetch('/api/lists?only=pairs,news').then(function(r){return r.json()}).then(function(d){
+    if(!d.ok)return;
+    if(d.html_pairs!==undefined){
+      var g1=document.getElementById('g1');
+      if(g1)g1.innerHTML=d.html_pairs;
+    }
+    if(d.html_news!==undefined){
+      var g3=document.getElementById('g3');
+      if(g3)g3.innerHTML=d.html_news;
+    }
+    if(d.counts){
+      for(var k in d.counts){
+        var el=document.querySelector('[data-cnt="'+k+'"]');
+        if(el)el.textContent=d.counts[k];
+      }
+    }
+  }).catch(function(){});
 }
 document.addEventListener('input',function(e){
   if(e.target.classList&&e.target.classList.contains('spin')){
@@ -2215,6 +2275,38 @@ class Handler(BaseHTTPRequestHandler):
                         "url": r.get("url"), "inq": r.get("inq")} for r in rows]
                 self._send(200, json.dumps({"ok": True, "spu": spu, "items": out},
                                            ensure_ascii=False))
+            elif self.path.split("?")[0] == "/api/lists":
+                # 只返回列表区块 HTML，供导入后局部刷新（避免整页重载导致重新下载图片）
+                # ?only=pairs,news 可只渲染需要的部分，明显更快
+                _q = parse_qs(urlparse(self.path).query)
+                _only = (_q.get("only") or [""])[0]
+                _want = set(_only.split(",")) if _only else {"products", "pairs", "news"}
+                invalidate_cache()
+                _d = load_data()
+                _prods = _d.get("products", [])
+                _pairs = _d.get("pairs", [])
+                _news = _d.get("news", [])
+                _pg = merge_by_spu(_prods)
+                _prg = merge_by_spu(_pairs, with_idx=True)
+                _ng = merge_by_spu(_news, with_idx=True)
+                out = {"ok": True, "counts": {
+                    "total": len(_pg),
+                    "spu": sum(1 for p in _prods if p["spu"]),
+                    "multi": sum(1 for p in _prods if p.get("multi_spu")),
+                    "noiq": sum(1 for p in _prods if not p["inq"]),
+                    "pairs": len(_prg),
+                    "news": len(_ng),
+                }}
+                if "products" in _want:
+                    out["html_products"] = "".join(product_card(p, i)
+                                                   for i, p in enumerate(_pg))
+                if "pairs" in _want:
+                    out["html_pairs"] = "".join(pair_card(g, i)
+                                                for i, g in enumerate(_prg))
+                if "news" in _want:
+                    out["html_news"] = "".join(news_card(g, i)
+                                               for i, g in enumerate(_ng))
+                self._send(200, json.dumps(out, ensure_ascii=False))
             elif self.path.startswith("/api/cat-l2"):
                 q = parse_qs(urlparse(self.path).query)
                 l1 = (q.get("l1") or [""])[0]

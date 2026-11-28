@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """相似款匹配引擎：图片哈希 + 标题相似度，返回候选及 SPU。"""
-import sys, io, os, re, json, urllib.request
+import sys, io, os, re, json, threading, urllib.request
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 from difflib import SequenceMatcher
 
@@ -413,6 +413,9 @@ def img_sig(path):
 # ===== URL 级签名缓存（存 Supabase img_sigs 表，云端重启不用重新下载图片）=====
 # 按客户分开缓存，避免 A 客户用到 B 客户的签名
 _URL_SIGS = {}
+_sig_lock = threading.Lock()
+_sig_inflight = {}
+_SIGS_CHANGED = False
 
 
 def _load_url_sigs():
@@ -440,22 +443,45 @@ def clear_sig_cache():
 def sig_for_url(url):
     """优先用 Supabase 签名缓存（不下载图片）；缺失才下载计算并写回。
     返回 (sig, path_or_None)：path 为 None 表示无需本地文件。"""
+    global _SIGS_CHANGED
     u = norm(url)
     if not u or not str(url).startswith("http"):
         return None, None
     sigs = _load_url_sigs()
-    if u in sigs and len(sigs[u]) >= 9:
-        return tuple(sigs[u]), None
+    cached = sigs.get(u)
+    if cached is not None and len(cached) >= 9:
+        return tuple(cached), None
+    # 同一个 URL 正在被别的线程算，等它算完直接用结果（避免重复下载）
+    with _sig_lock:
+        memo = _sig_inflight.get(u)
+        if memo is not None:
+            ev, box = memo
+        else:
+            ev, box = threading.Event(), {}
+            _sig_inflight[u] = (ev, box)
+            memo = None
+    if memo is not None:
+        ev.wait(timeout=25)
+        v = box.get("sig")
+        if v:
+            return v, None
+        # 对方失败了，自己算
     p = ensure_img(url)
     sig = img_sig(p) if p else None
     if sig is not None:
         sigs[u] = sig
+        _SIGS_CHANGED = True
         try:
             import supabase_store as _sb
             if _sb.enabled():
                 _sb.put_img_sig(u, [x if not isinstance(x, tuple) else list(x) for x in sig])
         except Exception:
             pass
+    with _sig_lock:
+        ent = _sig_inflight.pop(u, None)
+        if ent:
+            ent[1]["sig"] = tuple(sig) if sig is not None else None
+            ent[0].set()
     return sig, p
 
 

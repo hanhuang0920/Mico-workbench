@@ -486,17 +486,30 @@ _SIG_WRITE_OK = True
 
 
 def put_img_sig(url_key, sig_list):
+    """写单条签名。先试 upsert；失败则退化为 update/insert，都不通才熔断。"""
     global _SIG_WRITE_OK
-    if not _SIG_WRITE_OK:
+    if not _SIG_WRITE_OK or not url_key:
         return
+    cust = _cust()
+    row = {"url_key": url_key, "sig": sig_list, "customer": cust}
     try:
-        insert("img_sigs", [{"url_key": url_key, "sig": sig_list,
-                             "customer": _cust()}],
-               upsert_on="customer,url_key")
+        insert("img_sigs", [row], upsert_on="customer,url_key")
+        return
+    except Exception:
+        pass
+    # 退化路径：先按客户+url 更新，更新不到再插入
+    try:
+        update("img_sigs", {"url_key": url_key}, {"sig": sig_list})
+        return
+    except Exception:
+        pass
+    try:
+        _req("POST", "img_sigs", body=[row],
+             prefer="resolution=ignore-duplicates,return=minimal")
+        return
     except Exception as e:
-        # 表不存在/权限问题时熔断，避免每张图都白白请求一次
         _SIG_WRITE_OK = False
-        print("put_img_sig 失败（已停用签名回写）:", e)
+        print("put_img_sig 失败（已停用签名回写）:", str(e)[:120])
 
 
 def put_img_sigs_bulk(pairs_):
