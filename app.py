@@ -2082,16 +2082,32 @@ function spuHtml(c){
   if(c.spus.length>1)h+='<b class="tag">多</b>';
   return h;
 }
+var SIMCACHE={};
 function sim(idx,kind){
   SIMKIND=kind; SIMIDX=idx;
   var m=document.getElementById('modal');
   var b=document.getElementById('mbody');
-  b.innerHTML='<div class="simempty">正在比对，首次需下载图片，请稍候…</div>';
+  var ck=kind+':'+idx;
+  // 命中缓存直接渲染，不重复请求
+  if(SIMCACHE[ck]){ renderSim(SIMCACHE[ck],idx,kind); m.classList.add('on'); return; }
+  b.innerHTML='<div class="simempty">正在比对…</div>';
   m.classList.add('on');
   fetch('/api/similar',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({idx:idx,kind:kind})}).then(function(r){return r.json()})
   .then(function(d){
-    if(!d.ok){b.innerHTML='<div class="simempty">'+esc2(d.msg||'比対失败')+'</div>';return}
+    if(!d.ok){b.innerHTML='<div class="simempty">'+esc2(d.msg||'比对失败')+'</div>';return}
+    SIMCACHE[ck]=d;
+    renderSim(d,idx,kind);
+  }).catch(function(e){b.innerHTML='<div class="simempty">出错：'+esc2(e)+'</div>'});
+}
+function simClear(idx,kind){
+  if(idx===undefined){SIMCACHE={};return}
+  delete SIMCACHE[kind+':'+idx];
+}
+function renderSim(d,idx,kind){
+  var b=document.getElementById('mbody');
+  {
+    if(!d.ok){b.innerHTML='<div class="simempty">'+esc2(d.msg||'比对失败')+'</div>';return}
     var t=d.target, cs=d.candidates;
     var h='<div class="tgt"><div class="cmpimg">';
     h+= t.img? '<img src="'+esc2(t.img)+'">' : '<span class="nopic">无图</span>';
@@ -2123,7 +2139,7 @@ function sim(idx,kind){
       });
     }
     b.innerHTML=h;
-  }).catch(function(e){b.innerHTML='<div class="simempty">出错：'+esc2(e)+'</div>'});
+  }
 }
 function reflectLib(inq,spu){
   var pc=document.querySelector('#g0 .pc[data-i="'+String(inq||'').toLowerCase()+'"]');
@@ -2145,10 +2161,12 @@ function markSame(btn,idx,kind,row){
     body:JSON.stringify({idx:idx,kind:kind,same:true,cand_row:row})})
   .then(function(r){return r.json()}).then(function(d){
     closeModal();
+    simClear(idx,kind);
     if(!d.ok){toast('标记保存失败：'+(d.msg||''));return}
     if(kind==='news'&&d.removed){
       toast('库里已有同款，已移出未询盘新品');
-      setTimeout(function(){location.reload()},900);return;
+      simClear();
+      setTimeout(function(){refreshLists()},400);return;
     }
     if(kind==='pair'&&spu){
       var el=document.querySelector('.spin[data-idx="'+idx+'"]');
@@ -2575,10 +2593,36 @@ class Handler(BaseHTTPRequestHandler):
                         _sp.add(z)
                 if t.get("spu"):
                     _sp.add(t["spu"])
+                # 性能：并发补齐缺失的图片签名，避免逐张串行下载（每张约1秒）
+                try:
+                    pool = d.get("products", [])
+                    have = similar._load_url_sigs()
+                    miss = 0
+                    for x in pool:
+                        im = x.get("img")
+                        if im and similar.norm(im) not in have:
+                            miss += 1
+                    # 只有当缺失比例较大时才预取（少量缺失边走边算更快）
+                    if miss >= 5:
+                        need = [x["img"] for x in pool
+                                if x.get("img") and similar.norm(x["img"]) not in have]
+                        if t.get("img") and similar.norm(t["img"]) not in have:
+                            need.insert(0, t["img"])
+                        need = list(dict.fromkeys(need))[:80]
+                        from concurrent.futures import ThreadPoolExecutor
+                        def _one(u):
+                            try:
+                                similar.sig_for_url(u)
+                            except Exception:
+                                pass
+                        with ThreadPoolExecutor(max_workers=8) as ex:
+                            list(ex.map(_one, need))
+                except Exception as e:
+                    print("[similar] 预取失败（不影响结果）: %s" % str(e)[:80])
                 cands = similar.find_similar(names, t.get("img", ""),
-                                              d.get("products", []),
-                                              exclude_inq=t.get("inq") or None,
-                                              exclude_spu=_sp, t_url=t.get("url"))
+                                             d.get("products", []),
+                                             exclude_inq=t.get("inq") or None,
+                                             exclude_spu=_sp, t_url=t.get("url"))
                 out = []
                 for c in cands:
                     c["level_txt"] = similar.LEVEL_TXT.get(c["level"], "")
